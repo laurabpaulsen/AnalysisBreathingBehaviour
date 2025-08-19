@@ -5,9 +5,9 @@ import csv
 
 def simulate_event_stream_with_samples(
     sampling_rate=100,
-    order=[0, 1, 2, 3, 4]* 6,
-    ISIs=[1.23, 1.47, 1.3, 1.5, 1.75],
-    n_sequences=10,
+    order=[0, 1, 2, 3, 4]* 12,
+    ISIs=[1.23, 1.47, 1.38, 1.52, 1.75],
+    n_sequences=5,
     prop_left_right=[0.5, 0.5],
     trigger_mapping=None,
     seed=42
@@ -19,12 +19,12 @@ def simulate_event_stream_with_samples(
         "target/right/miss": 3,
         "target/left/hit": 4,
         "target/left/miss": 5,
+        "buttonpress": 6
     }
 
     np.random.seed(seed)
     t = 0.0
     event_log = []
-
     
         
     for isi_idx in order:
@@ -47,15 +47,16 @@ def simulate_event_stream_with_samples(
             rt = np.random.uniform(0.1, 0.5)
             sample = int(t * sampling_rate)
             event_log.append((sample, trigger_mapping[event_type], rt, intensity))
+            #event_log.append((sample + rt * sampling_rate, trigger_mapping["buttonpress"], np.nan, np.nan))
 
     total_samples = int(t * sampling_rate)
     return event_log, total_samples
 
 
 def simulate_respiration_belt_data(
-    duration_s=1000,
-    sampling_rate=100,
-    base_rate_hz=0.5,
+    duration_s,
+    sampling_rate,
+    base_rate_hz,
     variability=0.0001,
     noise_std=0.02
 ):
