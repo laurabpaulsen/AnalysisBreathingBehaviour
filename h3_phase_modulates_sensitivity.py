@@ -19,25 +19,17 @@ import statsmodels.formula.api as smf
 import psignifit as ps
 import psignifit.psigniplot as psp
 from tqdm import tqdm
-from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
 # PARAMETERS
 # for bins refitting of psychometric function
-DELTA_CENTER = np.pi/5 # SHOULD BE 30
+DELTA_CENTER = np.pi/10
 WIDTH = np.pi/5
-N_NULL_LMEM = 500#10_000
+N_NULL_LMEM = 10_000
 
-SUPPRESS_WARNINGS = True
-
-if SUPPRESS_WARNINGS:
-    import warnings
-    warnings.filterwarnings("ignore", category=ConvergenceWarning, module="statsmodels")
-
-rng = np.random.default_rng(47)
 
 psignifit_kwargs = {
     'experiment_type': '2AFC', 
-    'stimulus_range': [0, 3],
+    'stimulus_range': [0, 3], # CHANGE THIS!!
 
 }
 
@@ -64,7 +56,6 @@ def get_participant_salient_intensity(participant):
 
 
 def phase_bin_mask(phase_angles, center, width):
-    # signed shortest distance in radians, in range [-π, π]
     diff = (phase_angles - center + np.pi) % (2*np.pi) - np.pi
     return np.abs(diff) <= width / 2
 
@@ -121,20 +112,14 @@ if __name__ == "__main__":
 
     for participant, values in tqdm(data.items(), desc="Fitting psychometric functions"):
 
-        circ = values["circ"]
-        intensities = values["intensity"]
+        circ, intensities = values["circ"], values["intensity"]
 
         idx_hit = [idx for idx, label in enumerate(circ.labels) if "hit" in label]
         idx_miss = [idx for idx, label in enumerate(circ.labels) if "miss" in label]
 
-        intensity_hit = intensities[idx_hit]
-        intensity_miss = intensities[idx_miss]
+        intensity_hit, intensity_miss = intensities[idx_hit], intensities[idx_miss]
 
-        circ_hit = circ["hit"]
-        circ_miss = circ["miss"]
-
-        PA_hit = circ_hit.data
-        PA_miss = circ_miss.data
+        PA_hit, PA_miss = circ["hit"].data, circ["miss"].data
 
         assert len(intensity_hit) == len(PA_hit)
         assert len(intensity_miss) == len(PA_miss)
@@ -161,6 +146,20 @@ if __name__ == "__main__":
             mask = phase_bin_mask(PA, c, WIDTH)
             tmp_int = intensities[mask]
             tmp_hit_or_miss = hit_or_miss[mask]
+            
+            
+            # sanity check of mask only for one participant
+            from pyriodic import Circular, CircPlot
+
+            if participant == "04":
+                fig, ax = plt.subplots(figsize=(6, 6))
+                circ_masked = Circular(PA[mask])
+                plot_sanity = CircPlot(circ_masked)
+                plot_sanity.add_points()
+
+                plt.savefig(figpath / f"{participant}_sanity_check_masked_phase_{c:.2f}.png")
+                plt.close()
+            
 
             # All parameters except the threshold were then fixed and used as priors for fitting the psychometric function iteratively to an angle-specific subset of trials (gray functions).
             tmp_result = ps.psignifit(
@@ -183,7 +182,10 @@ if __name__ == "__main__":
             "threshold": [res.parameter_estimate['threshold'] for res in refitted_results]
         })
 
-        threshold_estimates = pd.concat([threshold_estimates, new_data], ignore_index=True)
+        threshold_estimates = pd.concat([
+            threshold_estimates if not threshold_estimates.empty else None, 
+            new_data
+            ], ignore_index=True)
 
         plot_subject_level(refitted_results, result_all_data, figpath / f"{participant}_psychometric_function.png")
 
@@ -193,7 +195,8 @@ if __name__ == "__main__":
         dependent_variable="threshold",
         n_null=N_NULL_LMEM,
         figpath=figpath / "h3_LMEM_phase_modulates_sensitivity.png",
-        txtpath=figpath / "h3_LMEM_results.txt"
+        txtpath=figpath / "h3_LMEM_results.txt",
+        n_jobs=-1
     )
     # Save threshold estimates to CSV
     threshold_estimates.to_csv(figpath / "threshold_estimates.csv", index=False)
