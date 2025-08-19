@@ -11,10 +11,10 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 import statsmodels.formula.api as smf
-from statsmodels.tools.sm_exceptions import ConvergenceWarning
+
 
 # PARAMETERS
-N_NULL_LMEM = 500 # 10000!!
+N_NULL_LMEM = 10_000
 OUTLIER_THRESHOLD = 3
 SIMPLE_MODEL = True
 RT_COL = "log_rt" # could also be "rt"
@@ -24,6 +24,7 @@ SUPPRESS_WARNINGS = True
 
 if SUPPRESS_WARNINGS:
     import warnings
+    from statsmodels.tools.sm_exceptions import ConvergenceWarning
     warnings.filterwarnings("ignore", category=ConvergenceWarning, module="statsmodels")
 
 
@@ -54,7 +55,8 @@ def LMEM(data):
 
 if __name__ == "__main__":
 
-    figpath = Path(__file__).parent / "results"
+    figpath = Path(__file__).parent / "results" / "h4"
+    figpath.mkdir(exist_ok=True, parents=True)
 
     data = load_data(["rt", "circ", "intensity"])
 
@@ -92,8 +94,10 @@ if __name__ == "__main__":
             "intensity": intensity
         })
 
-        LMEM_data = pd.concat([LMEM_data, new_data], ignore_index=True)
-    
+        LMEM_data = pd.concat([
+            LMEM_data if not LMEM_data.empty else None,
+            new_data
+        ], ignore_index=True)
 
     print(f"\nNumber of NaNs in LMEM_data:\n {LMEM_data.isnull().sum()}\n")
 
@@ -105,6 +109,7 @@ if __name__ == "__main__":
         data=LMEM_data,
         dependent_variable=RT_COL,
         n_null=N_NULL_LMEM, 
-        figpath=figpath / "h3b_LMEM_phase_modulates_RT.png", 
-        txtpath=figpath / "h3b_LMEM_phase_modulates_RT.txt"
+        figpath=figpath / "h4_LMEM_phase_modulates_RT.png", 
+        txtpath=figpath / "h4_LMEM_phase_modulates_RT.txt",
+        n_jobs=-1
     )
