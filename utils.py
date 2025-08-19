@@ -4,6 +4,7 @@ from pathlib import Path
 from tqdm import tqdm
 import numpy as np
 from typing import Callable
+from joblib import Parallel, delayed
 
 def load_data(variables:list[str], dataset:str = "simulated", suffix = "preproc.pkl"):
     if dataset == "simulated":
@@ -60,6 +61,55 @@ def plot_LMEM_result(empirical_norm, null_norms, pval, figpath=None, n_bins=100,
     plt.close()
 
 
+def LMEM_analysis(
+    LMEM:Callable, 
+    data, 
+    n_null, 
+    participant_col="participant", 
+    dependent_variable="threshold", 
+    figpath=None, 
+    txtpath=None, 
+    n_jobs=1
+):
+    # --- empirical fit ---
+    result = LMEM(data)
+
+    if txtpath:
+        with open(txtpath, "w") as f:
+            f.write(result.summary().as_text())
+            f.write("\nRandom Effects:\n")
+            for participant, re in result.random_effects.items():
+                f.write(f"Participant {participant}:\n{re}\n\n")
+
+    empirical_resp_phase_vector_norm = phase_vector_norm(
+        result.params["sin_phase"], result.params["cos_phase"]
+    )
+
+    # --- define shuffle function ---
+    def one_shuffle(seed=None):
+        shuffled = data.copy()
+        rng = np.random.default_rng(seed)
+        for participant in shuffled[participant_col].unique():
+            mask = shuffled[participant_col] == participant
+            shuffled.loc[mask, dependent_variable] = rng.permutation(
+                shuffled.loc[mask, dependent_variable].values
+            )
+        res = LMEM(shuffled)
+        return phase_vector_norm(res.params["sin_phase"], res.params["cos_phase"])
+
+    # --- run in parallel ---
+    null_resp_phase_vector_norms = Parallel(n_jobs=n_jobs)(
+        delayed(one_shuffle)(seed) for seed in tqdm(range(n_null), desc="LMEM fitting on shuffled dependent variable")
+    )
+
+    # --- compute p-value ---
+    pval = np.mean(null_resp_phase_vector_norms >= empirical_resp_phase_vector_norm)
+    print(f"p-value: {pval}")
+
+    # --- plot ---
+    plot_LMEM_result(empirical_resp_phase_vector_norm, null_resp_phase_vector_norms, pval, figpath=figpath)
+
+"""
 def LMEM_analysis(LMEM:Callable, data, n_null, participant_col = "participant", dependent_variable = "threshold", figpath=None, txtpath=None):
     result = LMEM(data)
 
@@ -99,3 +149,4 @@ def LMEM_analysis(LMEM:Callable, data, n_null, participant_col = "participant", 
 
     # plot
     plot_LMEM_result(empirical_resp_phase_vector_norm, null_resp_phase_vector_norms, pval, figpath=figpath)
+"""
