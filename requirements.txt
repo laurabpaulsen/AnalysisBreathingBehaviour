@@ -4,3 +4,4 @@ scipy
 bioread
 statsmodels
 psignifit
+joblib
