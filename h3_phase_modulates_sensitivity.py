@@ -111,7 +111,7 @@ def plot_subject_level(refitted_results, full_fitted_result, figpath = None):
 
 
 if __name__ == "__main__":
-    figpath = Path(__file__).parent / "results" / "h3a"
+    figpath = Path(__file__).parent / "results" / "h3"
     figpath.mkdir(parents=True, exist_ok=True)
 
     data = load_data(["intensity", "circ"])
@@ -192,8 +192,8 @@ if __name__ == "__main__":
         data = threshold_estimates,
         dependent_variable="threshold",
         n_null=N_NULL_LMEM,
-        figpath=figpath.parent / "h3a_LMEM_phase_modulates_sensitivity.png",
-        txtpath=figpath.parent / "h3a_LMEM_results.txt"
+        figpath=figpath / "h3_LMEM_phase_modulates_sensitivity.png",
+        txtpath=figpath / "h3_LMEM_results.txt"
     )
     # Save threshold estimates to CSV
     threshold_estimates.to_csv(figpath / "threshold_estimates.csv", index=False)
