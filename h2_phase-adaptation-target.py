@@ -15,9 +15,10 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from pyriodic.permutation import permutation_test_against_null, permutation_test_within_units
 from pyriodic import Circular, CircPlot
+from tqdm import tqdm
 
 # Parameters
-N_NULL = 2000 
+N_NULL = 5000
 N_PERMUTATIONS = 10000
 N_BINS = 20
 
@@ -29,12 +30,14 @@ def plot_participant_lvl(results, figpath=None):
     n_cols = int(np.ceil(n_participants / n_rows))
 
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 10), subplot_kw={'projection': 'polar'})
-    axes = axes.flatten()
-
+    try:
+        axes = axes.flatten()
+    except AttributeError:
+        axes = [axes]
     for i, (participant, values) in enumerate(results.items()):
-        circ_null = values["circ_null"]
         circ_target = values["circ_target"]
-        plot_tmp = CircPlot(circ_null, ax=axes[i], title=f"{participant}")
+        pval = values["pval"]
+        plot_tmp = CircPlot(circ_null, ax=axes[i], title=f"{participant}: p={pval:.3f}")
         plot_tmp.add_circular_mean(color = "lightblue")
         plot_tmp.add_arrows(
             np.array([circ_target.mean()]),
@@ -74,11 +77,13 @@ if __name__ == "__main__":
     figpath = Path(__file__).parent / "results" / "h2"
     figpath.mkdir(parents=True, exist_ok=True)
 
-    data = load_data(["circ", "phase_ts"])
+    variables = ["circ", "phase_ts"]
+    dataset = "before_pilots"
+    data = load_data(variables, dataset)
 
     results = {}
 
-    for participant, values in data.items():
+    for participant, values in tqdm(data.items(), desc="Participant:"):
         circ = values["circ"]
         circ_target = circ["target"]
 
@@ -92,7 +97,8 @@ if __name__ == "__main__":
             n_permutations=N_PERMUTATIONS,
             n_bins=N_BINS,
             return_null_samples=True,
-            return_obs_and_null_stats=True
+            return_obs_and_null_stats=True,
+            verbose=False
         )
 
         circ_null = Circular.from_multiple(
@@ -114,17 +120,19 @@ if __name__ == "__main__":
 
 
     # group level inference
-    null = [results[subj_id]["null_vs_null"] for subj_id in results]
-    obs = [results[subj_id]["obs_vs_null"] for subj_id in results]
+    null_null = [results[subj_id]["null_vs_null"] for subj_id in results]
+    obs_null = [results[subj_id]["obs_vs_null"] for subj_id in results]
 
-    group_obs_stat, group_pval, group_null = permutation_test_within_units(
-        data1=obs,
-        data2=null,
+    group_obs_stat, group_pval, group_null = permutation_test_within_units(    # is obs more different from null, than null are from null?
+
+        data1=obs_null,
+        data2=null_null,
         n_permutations=N_PERMUTATIONS,
         alternative="greater",
         verbose=True,
         return_null_distribution=True
     )
+
 
     plot_permutation_result(group_null, group_obs_stat, figpath=figpath / "h2_group_level.png", pval=group_pval)
     print(f"\n Group-level p-value: {group_pval}")

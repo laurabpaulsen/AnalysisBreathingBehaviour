@@ -22,7 +22,7 @@ from tqdm import tqdm
 
 # PARAMETERS
 # for bins refitting of psychometric function
-DELTA_CENTER = np.pi/10
+DELTA_CENTER = np.pi/20
 WIDTH = np.pi/5
 N_NULL_LMEM = 10_000
 
@@ -98,28 +98,66 @@ def plot_subject_level(refitted_results, full_fitted_result, figpath = None):
     plt.close()
 
 
+def plot_priors(res, figpath=None):
+
+    psp.plot_prior(res)
+
+    if figpath:
+        plt.savefig(figpath)
+    plt.close()
+
+def plot_grand_average_modulation(threshold_estimates, figpath=None):
+
+    average_zscored_thresholds = []
+    center = []
     
+    for c in threshold_estimates["center"].unique():
+        average_zscored_thresholds.append(threshold_estimates[threshold_estimates["center"] == c]["zscored_threshold"].mean())
+        center.append(c)
+
+    fig, ax = plt.subplots(1, 1, figsize = (4, 4), dpi = 300, subplot_kw={'projection': 'polar'})
+
+
+    circ = Circular(center) 
+    plot = CircPlot(circ=circ, group_by_labels=False, ax=ax)
+    plot.add_hline(np.mean(average_zscored_thresholds), c = "lightgray", linestyle='--', linewidth=1)
+
+    plot.add_connected_points(
+        y = average_zscored_thresholds,
+        color = "forestgreen",
+        linewidth = 1,
+        marker = "o",
+        markersize = 2
+    )
+
+    if figpath:
+        plt.savefig(figpath)
+    plt.close()
 
 
 if __name__ == "__main__":
+
+
+    variables = ["intensity", "circ"]
+    dataset = "before_pilots"
+    data = load_data(variables, dataset)
+
     figpath = Path(__file__).parent / "results" / "h3"
     figpath.mkdir(parents=True, exist_ok=True)
 
-    data = load_data(["intensity", "circ"])
-
     # empty dataframe to store threshold estimates
-    threshold_estimates = pd.DataFrame(columns=["participant", "sin_phase", "cos_phase", "threshold"])
+    threshold_estimates = pd.DataFrame(columns=["participant", "center", "sin_phase", "cos_phase", "threshold", "zscored_threshold"])
 
     for participant, values in tqdm(data.items(), desc="Fitting psychometric functions"):
 
         circ, intensities = values["circ"], values["intensity"]
 
-        idx_hit = [idx for idx, label in enumerate(circ.labels) if "hit" in label]
-        idx_miss = [idx for idx, label in enumerate(circ.labels) if "miss" in label]
+        idx_hit = [idx for idx, label in enumerate(circ.labels) if "/correct" in label]
+        idx_miss = [idx for idx, label in enumerate(circ.labels) if "/incorrect" in label]
 
         intensity_hit, intensity_miss = intensities[idx_hit], intensities[idx_miss]
 
-        PA_hit, PA_miss = circ["hit"].data, circ["miss"].data
+        PA_hit, PA_miss = circ["/correct"].data, circ["/incorrect"].data
 
         assert len(intensity_hit) == len(PA_hit)
         assert len(intensity_miss) == len(PA_miss)
@@ -133,7 +171,7 @@ if __name__ == "__main__":
 
 
         result_all_data = ps.psignifit(
-            format_data_for_psignifit(intensities, hit_or_miss), **psignifit_kwargs
+            format_data_for_psignifit(intensities, hit_or_miss), debug=True, **psignifit_kwargs
         )
 
         # REFITTING ACROSS THE BINS
@@ -142,10 +180,11 @@ if __name__ == "__main__":
 
 
         refitted_results = []
-        for c in center_of_bins:
+        for i, c in enumerate(center_of_bins):
             mask = phase_bin_mask(PA, c, WIDTH)
             tmp_int = intensities[mask]
             tmp_hit_or_miss = hit_or_miss[mask]
+            print(tmp_hit_or_miss)
             
             
             # sanity check of mask only for one participant
@@ -159,7 +198,8 @@ if __name__ == "__main__":
 
                 plt.savefig(figpath / f"{participant}_sanity_check_masked_phase_{c:.2f}.png")
                 plt.close()
-            
+
+                plot_priors(result_all_data, figpath / f"{participant}_priors_all_data.png")
 
             # All parameters except the threshold were then fixed and used as priors for fitting the psychometric function iteratively to an angle-specific subset of trials (gray functions).
             tmp_result = ps.psignifit(
@@ -170,17 +210,27 @@ if __name__ == "__main__":
                     'lambda': result_all_data.parameter_estimate['lambda'],
                     'width': result_all_data.parameter_estimate['width']
                 },
+                debug=True,
                 **psignifit_kwargs
             )
+            #if i == 0:
+            #    plot_priors(tmp_result, figpath / f"{participant}_priors_phase_{c:.2f}.png")
 
             refitted_results.append(tmp_result)
 
+
+        thresholds_refitted = [res.parameter_estimate['threshold'] for res in refitted_results]
+        zscored_thresholds = (thresholds_refitted - np.mean(thresholds_refitted)) / np.std(thresholds_refitted)
+        
         new_data = pd.DataFrame({
             "participant": participant,
+            "center": center_of_bins,
             "sin_phase": np.sin(center_of_bins),
             "cos_phase": np.cos(center_of_bins),
-            "threshold": [res.parameter_estimate['threshold'] for res in refitted_results]
+            "threshold": thresholds_refitted,
+            "zscored_threshold": zscored_thresholds
         })
+
 
         threshold_estimates = pd.concat([
             threshold_estimates if not threshold_estimates.empty else None, 
@@ -188,6 +238,11 @@ if __name__ == "__main__":
             ], ignore_index=True)
 
         plot_subject_level(refitted_results, result_all_data, figpath / f"{participant}_psychometric_function.png")
+
+        # Save threshold estimates to CSV
+    threshold_estimates.to_csv(figpath / "threshold_estimates.csv", index=False)
+
+    plot_grand_average_modulation(threshold_estimates, figpath / "grand_average_modulation.png")
 
     LMEM_analysis(
         LMEM=LMEM,
@@ -198,5 +253,3 @@ if __name__ == "__main__":
         txtpath=figpath / "h3_LMEM_results.txt",
         n_jobs=-1
     )
-    # Save threshold estimates to CSV
-    threshold_estimates.to_csv(figpath / "threshold_estimates.csv", index=False)

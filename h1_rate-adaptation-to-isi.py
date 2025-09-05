@@ -21,8 +21,6 @@ def mixed_effect_model(df):
     model = smf.mixedlm("respiratory_frequency ~ ISI_centered", data=df, groups=df["participant"],
                         re_formula="~ISI_centered")
     result = model.fit()
-
-
     # model specification in R would be
     # respiratory_frequency ~ ISI_centered + (ISI_centered | participant)
 
@@ -72,66 +70,105 @@ def plot(df, figpath):
         plt.savefig(figpath)
 
 
+
+def extract_blocks(data_behav, event_samples, sfreq):
+    """Return block-level timing and sample indices."""
+    blocks = []
+
+    for block in data_behav["block"].unique():
+        idx_start = data_behav.index[data_behav["block"] == block][0]
+        idx_end = data_behav.index[data_behav["block"] == block][-1]
+
+        time_start = data_behav.iloc[idx_start]["time"]
+        time_end = data_behav.iloc[idx_end]["time"]
+        isi = data_behav.iloc[idx_start]["ISI"]
+        sample_start = event_samples[idx_start]
+        sample_end = event_samples[idx_end]
+
+        duration = time_end - time_start
+        sample_duration = (sample_end - sample_start) / sfreq
+
+        if not np.isclose(sample_duration, duration, atol=0.1):
+            print(
+                f"⚠️ Block {block}: sample vs time duration mismatch "
+                f"({sample_duration:.3f} vs {duration:.3f} s)"
+            )
+
+        blocks.append(
+            dict(
+                block=block,
+                time_start=time_start,
+                time_end=time_end,
+                ISI=isi,
+                sample_start=sample_start,
+                sample_end=sample_end,
+                duration=duration,
+            )
+        )
+
+    return pd.DataFrame(blocks)
+
+
+def compute_resp_freq(blocks, peaks, sfreq, participant):
+    """Compute respiratory frequency per block."""
+    results = []
+    for _, row in blocks.iterrows():
+        peak_in_block = peaks[
+            (peaks >= row["sample_start"]) & (peaks <= row["sample_end"])
+        ]
+        if len(peak_in_block) < 2:
+            continue
+
+        duration_peak_to_peak = (peak_in_block[-1] - peak_in_block[0]) / sfreq
+        resp_freq = respfreq(len(peak_in_block), duration_peak_to_peak / 60)
+
+        results.append(
+            dict(
+                participant=participant,
+                respiratory_frequency=resp_freq,
+                ISI=row["ISI"],
+                block_number=row["block"],
+            )
+        )
+    return pd.DataFrame(results)
+
 if __name__ == "__main__":
-    sampling_rate = 100
-    n_stim_per_sequence = 4
-    n_sequence_per_block = 10
+    variables = ["peaks", "event_samples_all", "event_ids_all", "sfreq"]
+    dataset = "before_pilots"
+    data = load_data(variables, dataset)
 
-    variables = ["peaks", "event_samples", "event_ids"]
-    data = load_data(variables)
 
-    figpath = Path(__file__).parent / "results" / "h1"/ "h1_respiratory_frequency_vs_isi.png"
-    figpath.parent.mkdir(exist_ok=True, parents=True)
+    # prepare output paths
+    outdir = Path(__file__).parent / "results" / "h1"
+    outdir.mkdir(exist_ok=True, parents=True)
+    
+    figpath = outdir / "h1_respiratory_frequency_vs_isi.png"
+    txtpath = outdir/ "h1_LMEM_results.txt"
 
-    # create an empty DataFrame
+
+    # create an empty DataFrame to store the results
     df = pd.DataFrame(columns=["participant", "respiratory_frequency", "ISI", "block_number"])
 
     for participant, values in data.items():
-
         peaks = values["peaks"]
-        event_samples = values["event_samples"]
-        event_ids = values["event_ids"]
+        event_samples = values["event_samples_all"]
+        event_ids = values["event_ids_all"]
+        sfreq = values["sfreq"]
 
-        # first step is to determine when each block begins and ends
-        # we do this by looking at the time between the event samples
-        diffs = np.diff(event_samples)
-        for dif in diffs:
-            print(dif)
-        block_changes = np.where(np.abs(np.diff(diffs)) > 2)[0]
-        block_start_indices = [0] + (block_changes + 1).tolist()
-        block_end_indices = (block_changes + 1).tolist() + [len(event_samples) - 1]
-        block_indices = list(zip(block_start_indices, block_end_indices))
+        # load in the behavioural data
+        behav_path = Path(__file__).parent / "data" / dataset / "raw" / f"{participant}_behavioural_data.csv"
+        data_behav = pd.read_csv(behav_path)
 
-        for i, (start_idx, end_idx) in enumerate(block_indices):
-            start_samp = event_samples[start_idx]
-            end_samp = event_samples[end_idx]
+        blocks = extract_blocks(data_behav, event_samples, sfreq)
+        df_participant = compute_resp_freq(blocks, peaks, sfreq, participant)
+        
+        df = pd.concat([df, df_participant], ignore_index=True)
 
-            duration = (end_samp - start_samp) / sampling_rate
-
-            # Calculate ISI from event samples inside the block
-            block_event_samples = event_samples[start_idx:end_idx + 1]
-            block_diffs = np.diff(block_event_samples) / sampling_rate
-            isi = np.round(np.mean(block_diffs), 2)
-            #print(f"Participant {participant}, Block {i}, ISI: {isi}")
-
-            peak_in_block = peaks[(peaks >= start_samp) & (peaks <= end_samp)]
-
-            # first peak samp
-            first_peak_samp = peak_in_block[0]
-            last_peak_samp = peak_in_block[-1]
-
-            duration_peak_to_peak = (last_peak_samp - first_peak_samp) / sampling_rate
-
-            resp_freq = respfreq(len(peak_in_block), duration_peak_to_peak/60)
-            df = pd.concat([df, pd.DataFrame({"participant": [participant], "respiratory_frequency": [resp_freq], "ISI": [isi], "block_number": [i]})], ignore_index=True)
-
-    print(df["ISI"].unique())
 
     df["ISI_centered"] = df["ISI"] - df["ISI"].min()
 
     result = mixed_effect_model(df)
 
-    txtpath = figpath.parent / "h1_LMEM_results.txt"
     with open(txtpath, "w") as f:
         f.write(result.summary().as_text())
 

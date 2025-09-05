@@ -55,13 +55,16 @@ def LMEM(data):
 
 if __name__ == "__main__":
 
+    dataset = "before_pilots"
+    variables = ["rt", "circ", "intensity"]
+    data = load_data(variables, dataset)
+
     figpath = Path(__file__).parent / "results" / "h4"
     figpath.mkdir(exist_ok=True, parents=True)
 
-    data = load_data(["rt", "circ", "intensity"])
 
     LMEM_data = pd.DataFrame(columns=["participant", "rt", "cos_phase", "sin_phase", "intensity"])
-    
+        
     for participant, values in data.items():
         # remove nans from rt
         rt = np.array(values["rt"])
@@ -70,8 +73,11 @@ if __name__ == "__main__":
         rt = rt[rt_indices]
 
         circ = values["circ"]
-        targets_with_responses = circ.data[rt_indices]
-        intensity = values["intensity"][rt_indices]
+        targets_with_responses = circ.data[rt_indices-1] # get the phase angle at the target stimuli
+        intensity = values["intensity"][rt_indices-1] # get the intensity of the target stimuli
+
+        # check that target is in label
+        assert ["target" in label for label in circ.labels[rt_indices-1]], "something went wrong"
 
         # detect outliers
         z_scores = np.abs(stats.zscore(rt))
@@ -99,10 +105,13 @@ if __name__ == "__main__":
             new_data
         ], ignore_index=True)
 
+    print(LMEM_data.head())
     print(f"\nNumber of NaNs in LMEM_data:\n {LMEM_data.isnull().sum()}\n")
 
     # drop rows with nans
     LMEM_data = LMEM_data.dropna()
+
+    print(LMEM_data.head())
 
     LMEM_analysis(
         LMEM=LMEM, 

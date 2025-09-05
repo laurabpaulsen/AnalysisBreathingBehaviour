@@ -11,9 +11,12 @@ def load_data(variables:list[str], dataset:str = "simulated", suffix = "preproc.
         # error: FileNotFoundError: No files found with suffix 'preproc.pkl' in /Users/au661930/Library/CloudStorage/OneDrive-Aarhusuniversitet/Dokumenter/projects/_BehaviouralBreathing/code/AnalysisBreathingBehaviour/simulation/data/intermediate
         # path to one of the files: /Users/au661930/Library/CloudStorage/OneDrive-Aarhusuniversitet/Dokumenter/projects/_BehaviouralBreathing/code/AnalysisBreathingBehaviour/simulation/data/intermediate/participant_00_preproc.pkl
         datapath = Path(__file__).parent / "simulation" / "data" / "intermediate"
-
+    elif dataset == "before_pilots":
+        datapath = Path(__file__).parent / "data" / "before_pilots" / "intermediate"
     elif dataset == "real":
         raise NotImplementedError("Real dataset loading is not implemented yet.")
+    
+
 
     # find all files in the path
     files = list(datapath.glob(f"**/*{suffix}"))
@@ -26,7 +29,7 @@ def load_data(variables:list[str], dataset:str = "simulated", suffix = "preproc.
         with open(file, "rb") as f:
 
             # get the participant label
-            participant = file.stem.split("_")[1]
+            participant = file.stem.split("_")[0]
             file_data = pkl.load(f)
             data_tmp = {var: file_data[var] for var in variables if var in file_data}
             data[participant] = data_tmp
@@ -34,6 +37,37 @@ def load_data(variables:list[str], dataset:str = "simulated", suffix = "preproc.
     return data
 
 
+def create_trigger_mapping(
+        simulated = False,
+        stim = 1,
+        target = 2,
+        middle = 4,
+        index = 8,
+        response = 16,
+        correct = 32,
+        incorrect = 64):
+    if simulated:
+        trigger_mapping = {
+            "stim/salient": 1,
+            "target/right/hit": 2,
+            "target/right/miss": 3,
+            "target/left/hit": 4,
+            "target/left/miss": 5,
+        }
+
+    else:   
+        trigger_mapping = {
+            "stim/salient": stim,
+            "target/middle": target + middle,
+            "target/index": target + index,
+            "response/index/correct": response + index + correct,
+            "response/middle/incorrect": response + middle + incorrect,
+            "response/middle/correct": response + middle + correct,
+            "response/index/incorrect": response + index + incorrect, 
+            }
+
+
+    return trigger_mapping
 
 
 def phase_vector_norm(sine, cos):
