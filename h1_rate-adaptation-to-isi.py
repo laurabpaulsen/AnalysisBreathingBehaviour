@@ -2,6 +2,7 @@
 This script tests H1:
 * Respiration rate adapts to the stimulus presentation rate (i.e., shorter interstimulus intervals will result in faster breathing, and longer interstimulus intervals will result in slower breathing).
 """
+from scipy import stats
 
 from utils import load_data
 import pandas as pd
@@ -14,17 +15,17 @@ import statsmodels.formula.api as smf
 def respfreq(n_peaks, duration):
     return n_peaks / duration
 
-def mixed_effect_model(df):
+def LMEM(df):
 
     # ISI is numeric, respiratory_frequency is continuous
     # Fit linear mixed-effects model with random intercept and slope per participant
     model = smf.mixedlm("respiratory_frequency ~ ISI_centered", data=df, groups=df["participant"],
                         re_formula="~ISI_centered")
-    result = model.fit()
+
     # model specification in R would be
     # respiratory_frequency ~ ISI_centered + (ISI_centered | participant)
 
-    return result
+    return model.fit()
 
 
 def plot(df, figpath):
@@ -74,8 +75,17 @@ def plot(df, figpath):
 def extract_blocks(data_behav, event_samples, sfreq):
     """Return block-level timing and sample indices."""
     blocks = []
+    print(data_behav["block"].unique())
 
-    for block in data_behav["block"].unique():
+    data_behav["block"] = pd.to_numeric(data_behav["block"], errors="coerce")
+
+    unique_blocks = data_behav["block"].unique()
+
+    # only keep the ones that are integers (remove practice blocks)
+    unique_blocks = unique_blocks[~np.isnan(unique_blocks)]
+    unique_blocks = unique_blocks[unique_blocks.astype(int) == unique_blocks]
+
+    for block in unique_blocks:
         idx_start = data_behav.index[data_behav["block"] == block][0]
         idx_end = data_behav.index[data_behav["block"] == block][-1]
 
@@ -134,7 +144,7 @@ def compute_resp_freq(blocks, peaks, sfreq, participant):
 
 if __name__ == "__main__":
     variables = ["peaks", "event_samples_all", "event_ids_all", "sfreq"]
-    dataset = "before_pilots"
+    dataset = "pilots"
     data = load_data(variables, dataset)
 
 
@@ -167,7 +177,13 @@ if __name__ == "__main__":
 
     df["ISI_centered"] = df["ISI"] - df["ISI"].min()
 
-    result = mixed_effect_model(df)
+    result = LMEM(df)
+    beta = result.params["ISI_centered"]
+    ci = result.conf_int().loc["ISI_centered"]
+    p = result.pvalues["ISI_centered"]
+
+    ci_lower, ci_upper = ci[0], ci[1]
+    print(f"\nbeta (ISI_centered) = {beta:.3f}, 95% CI = [{ci_lower:.3f}, {ci_upper:.3f}], p = {p:.3f}\n")
 
     with open(txtpath, "w") as f:
         f.write(result.summary().as_text())
@@ -181,4 +197,25 @@ if __name__ == "__main__":
 
     # sort the df by participant
     df = df.sort_values("participant")
-    plot(df, figpath)
+    plot(df, figpath=figpath)
+
+
+
+    model_null = smf.mixedlm("respiratory_frequency ~ 1", data=df, groups=df["participant"])
+    result_null = model_null.fit()
+
+
+    # log-likelihoods
+    llf_full = result.llf
+    llf_null = result_null.llf
+
+    # test statistic: 2 * difference in log-likelihoods
+    lr_stat = 2 * (llf_full - llf_null)
+    df_diff = result.df_modelwc - result_null.df_modelwc  # difference in number of estimated parameters
+
+    # p-value
+    pval = stats.chi2.sf(lr_stat, df_diff)
+
+    print("Likelihood Ratio Test:")
+    print(f"LR statistic = {lr_stat:.3f}, df = {df_diff}, p = {pval:.3g}")
+
