@@ -13,6 +13,8 @@ def load_data(variables:list[str], dataset:str = "simulated", suffix = "preproc.
         datapath = Path(__file__).parent / "simulation" / "data" / "intermediate"
     elif dataset == "before_pilots":
         datapath = Path(__file__).parent / "data" / "before_pilots" / "intermediate"
+    elif dataset == "pilots":
+        datapath = Path(__file__).parent / "data" / "pilots" / "intermediate"
     elif dataset == "real":
         raise NotImplementedError("Real dataset loading is not implemented yet.")
     
@@ -64,6 +66,10 @@ def create_trigger_mapping(
             "response/middle/incorrect": response + middle + incorrect,
             "response/middle/correct": response + middle + correct,
             "response/index/incorrect": response + index + incorrect, 
+            "break/start": 128,
+            "break/end": 129,
+            "experiment/start": 254,
+            "experiment/end": 255
             }
 
 
@@ -184,3 +190,43 @@ def LMEM_analysis(LMEM:Callable, data, n_null, participant_col = "participant", 
     # plot
     plot_LMEM_result(empirical_resp_phase_vector_norm, null_resp_phase_vector_norms, pval, figpath=figpath)
 """
+
+# defining some helper functions
+def binned_stats(phase_angles, var, n_bins=10, stat="mean"):
+    """
+    Calculate binned statistics for response times.
+    
+    Parameters:
+    rt (array-like): Response times.
+    n_bins (int): Number of bins to use.
+    stat (str): Statistic to calculate ('mean' or 'median').
+    
+    Returns:
+    bin_centers (array): Centers of the bins.
+    avg_response_times (array): Average response times in each bin.
+    std_response_times (array): Standard deviation of response times in each bin.
+    """
+    bin_edges = np.linspace(0, 2 * np.pi, n_bins + 1)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    avg_response_times = np.zeros(n_bins+1)
+    std_response_times = np.zeros(n_bins+1)
+    
+    for i in range(n_bins):
+        bin_mask = (phase_angles >= bin_edges[i]) & (phase_angles < bin_edges[i + 1])
+        if stat == "mean":
+            avg_response_times[i] = np.mean(var[bin_mask]) if np.any(bin_mask) else np.nan
+        elif stat == "median":
+            avg_response_times[i] = np.median(var[bin_mask]) if np.any(bin_mask) else np.nan
+        else:
+            raise ValueError("stat must be 'mean' or 'median'")
+        # Ensure the last two dots are connected
+        std_response_times[i] = np.std(var[bin_mask]) if np.any(bin_mask) else np.nan
+            
+    # Ensure the last two dots are connected
+    avg_response_times[-1] = avg_response_times[0]
+    std_response_times[-1] = std_response_times[0]
+    bin_centers = np.concatenate((bin_centers, [bin_centers[0]]))
+
+    return bin_centers, avg_response_times, std_response_times
+
+
