@@ -179,3 +179,10 @@ trash/*
 simulation/data
 
 .DS_Store
+
+h2_testing/*
+iaaft*
+
+dk_exampledata/*
+
+pilots_exploration.ipynb
