@@ -56,7 +56,7 @@ def LMEM(data):
     return model.fit()
 
 
-def plot_subject_RT_by_phase(data, figpath, filter_outliers=True, num_bins=12, stat="mean"):
+def plot_subject_RT_by_phase(data, figpath, filter_outliers=True, num_bins=40, stat="mean"):
     """
     Plot response time by phase for each subject in a polar plot.
 
@@ -85,7 +85,7 @@ def plot_subject_RT_by_phase(data, figpath, filter_outliers=True, num_bins=12, s
 
     figsize = (n_cols * 4, n_rows * 4)
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize, subplot_kw={"projection": "polar"}, sharex=True, sharey=True)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize, subplot_kw={"projection": "polar"}, sharex=True, sharey=False)
 
     for i, (subj_id, dat) in enumerate(data.items()):
 
@@ -118,6 +118,7 @@ def plot_subject_RT_by_phase(data, figpath, filter_outliers=True, num_bins=12, s
         plot = CircPlot(circ_for_plot, group_by_labels=False, ax=axes[i], title=subj_id)
         plot.add_connected_points(y=avg_response_times, color='forestgreen', alpha=0.5, marker ='o')
         plot.add_hline(y=np.nanmean(avg_response_times), color='gray', linestyle='--', label=f'{stat.capitalize()} RT')
+        axes[i].set_ylim(0.4, np.nanmax(avg_response_times) + 0.1 * np.nanmax(avg_response_times))
 
 
 
@@ -148,7 +149,7 @@ if __name__ == "__main__":
         data=data,
         figpath=figpath / "h4_RT_by_phase_polar.png",
         filter_outliers=True,
-        num_bins=12,
+        num_bins=20,
         stat="mean"
     )
 

@@ -18,7 +18,8 @@ from pyriodic import Circular, CircPlot
 from pyriodic.density import vonmises_kde
 from tqdm import tqdm
 from scipy import stats
-from pyriodic.permutation import get_breathing_cycles, precompute_cycle_array, make_scrambled_PA
+from pyriodic.surrogate import get_breathing_cycles, precompute_cycle_array, make_scrambled_PA
+
 
 from typing import Union, Optional, Literal, Callable
 
@@ -307,7 +308,6 @@ if __name__ == "__main__":
     trigger_mapping = create_trigger_mapping()
     # opposite of what we had before, because we want to align to target events
     targets_id  = [v for k, v in trigger_mapping.items() if "target" in k]
-    print("Trigger mapping:", targets_id)
 
     stat_fun = max_density
     stat_fun_name = "max density"
@@ -320,7 +320,6 @@ if __name__ == "__main__":
         circ_target = circ["target"]
         events = values["event_samples"]
         events_ids = values["event_ids"]
-        #print(events_ids)
 
         # only keep events that are target events
         idx_target = np.array([i for i, eid in enumerate(events_ids) if eid in targets_id])

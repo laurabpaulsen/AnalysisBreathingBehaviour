@@ -13,7 +13,7 @@ from bioread import read_file
 
 LOW_FREQ = 0.1
 HIGH_FREQ = 1
-WINDOW_SIZE_SMOOTHING = 50 #ms
+WINDOW_SIZE_SMOOTHING = 200 #ms
 
 
 def csv_to_events_array(df: pd.DataFrame, sfreq: float) -> np.ndarray:
@@ -176,6 +176,8 @@ def preprocess(raw):
     print("Z-scoring")
     raw.zscore()
 
+    return raw
+
 def sanity_check_phase_angle(resp_timeseries = None, normalised_ts = None, peaks = None, troughs = None, phase_angle = None, savepath = None):
     fig, axes = plt.subplots(2, 1, figsize = (40, 4), dpi = 300)
 
@@ -270,18 +272,13 @@ if __name__ == "__main__":
     fig_dir = data_dir.parent / "fig"
     fig_dir.mkdir(parents=True, exist_ok=True)
     participant_files = sorted(data_dir.glob("*.acq"))
-
     trigger_mapping = create_trigger_mapping(simulated=True if dataset=="simulation" else False)
-
 
     # Parameters
     plot_phase_diag = True
 
     # Loop through each participant
     for resp_path in participant_files:
-        print(resp_path)
-        
-
         participant_id = resp_path.stem.split("_")[0]
         behav_path = data_dir / f"{participant_id}_behavioural_data.csv"
         
@@ -293,8 +290,6 @@ if __name__ == "__main__":
         sampling_rate = data.samples_per_second
         print(f"Sampling rate: {sampling_rate} Hz")
         t, resp = data.time_index, data.channels[0].data  # assuming respiration is the first channel
-        #resp_data = np.loadtxt(resp_path, delimiter=",", skiprows=1)
-        #t, resp = resp_data[:, 0], resp_data[:, 1]
 
 
         behav_data = pd.read_csv(behav_path)
@@ -323,7 +318,7 @@ if __name__ == "__main__":
         # --- Preprocess ---
         print(f"Preprocessing {participant_id}")
         raw = RawSignal(resp, fs=sampling_rate)
-        preprocess(raw)
+        raw = preprocess(raw)
 
         # --- Extract phase angles ---
         phase, peaks, troughs = raw.phase_twopoint(prominence=0.3, distance=0.5)
@@ -397,6 +392,7 @@ if __name__ == "__main__":
                 "preprocessed": raw.ts,
                 "phase_ts": phase,
                 "peaks": peaks,
+                "troughs": np.array(troughs),
                 "circ": circ,
                 "rt": np.array(rt_no_rejected),
                 "intensity": np.array(intensity_no_rejected),

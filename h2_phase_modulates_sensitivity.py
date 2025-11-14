@@ -140,7 +140,6 @@ def plot_subject_level(refitted_results, full_fitted_result, center_of_bins, fig
     thresholds = [res.parameter_estimate['threshold'] for res in refitted_results]
     thresholds = np.array(thresholds)
 
-    #inset_ax.set_ylim(1, 2.5)  # Set radius limits to match stimulus range
 
      # Add a color bar legend
 
@@ -149,8 +148,11 @@ def plot_subject_level(refitted_results, full_fitted_result, center_of_bins, fig
         color = [cmap(norm(c)) for c in center_of_bins],
         s=10
     )
-    plot.add_hline(np.mean(thresholds), c = "lightgray", linestyle='--', linewidth=1)
 
+    # add hline at the threshold of the full data fit
+    plot.add_hline(full_fitted_result.parameter_estimate['threshold'], c = "k", linestyle='--', linewidth=1,)
+
+    inset_ax.set_ylim(np.min(thresholds) * 0.7, np.max(thresholds) * 1.3)
     
     # change theta direction to match remaining plots
     #inset_ax.set_theta_direction(-1)
@@ -225,6 +227,9 @@ def plot_grand_average_modulation(threshold_estimates, figpath=None):
         color="forestgreen",
         alpha=0.2
     )
+
+    # set r limits
+    ax.set_ylim(np.min(mean_z - sem_z) * 1.5, np.max(mean_z + sem_z) * 1.5)
 
     if figpath:
         plt.savefig(figpath)
