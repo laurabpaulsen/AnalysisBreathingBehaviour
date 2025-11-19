@@ -7,83 +7,22 @@ import numpy as np
 from utils import load_data, create_trigger_mapping
 from pathlib import Path
 import matplotlib.pyplot as plt
-from pyriodic import Circular, CircPlot
-from pyriodic.density import vonmises_kde
 
-from pyriodic.surrogate import get_breathing_cycles, precompute_cycle_array, make_scrambled_PA
-from pyriodic.stats_surrogate import test_against_surrogate
-
-from typing import Union, Optional, Literal, Callable
+from typing import Union
 from tqdm import tqdm
 from scipy import stats
 
+
+from pyriodic import Circular, CircPlot
+from pyriodic.density import vonmises_kde
+from pyriodic.surrogate import surrogate_scramble_breath_cycles
+from pyriodic.stats_surrogate import test_against_surrogate
+
 # Parameters
-N_NULL = 5000
+N_SURR = 5000
 N_PERMUTATIONS = 10000
 N_BINS = 100 # for density estimation
 KAPPA = 20  # for density estimation
-
-
-def generate_surrogate_samples(
-    observed: np.ndarray,
-    phase_pool: Union[np.ndarray, Literal["uniform"]] = "uniform",
-    time_shift: bool = False,
-    scramble_breath_cycles: bool = False,
-    events = None,
-    n_null: int = 1000,
-    rng: Optional[np.random.Generator] = None,
-    ):
-    
-        
-    if rng is None:
-        rng = np.random.default_rng()
-
-    n_events = len(observed)
-
-    # Generate null samples
-    if isinstance(phase_pool, str) and phase_pool == "uniform":
-        phase_pool = np.linspace(0, 2 * np.pi, len(observed), endpoint=False)
-    elif not isinstance(phase_pool, np.ndarray):
-        raise ValueError("phase_pool must be a numpy array or 'uniform'.")
-
-    
-    if time_shift or scramble_breath_cycles:
-        if events is None:
-            raise ValueError("events must be provided when time_shift is True.")
-        if len(events) != len(observed):
-            raise ValueError("events and observed must have the same length.")
-    
-    if time_shift:
-        print("Generating null samples with time shifts...")
-        surr_samples = []
-
-        # get an integer shift for each null sample )(between 0 and the number of samples in PA)
-        shifts = rng.integers(0, len(phase_pool), size=n_null)
-        for shift in shifts:
-            # shift PA by the random amount
-            shifted = np.roll(phase_pool, shift)
-            # sample the same number of phases as in the observed data
-            surr_sample = shifted[events]
-            surr_samples.append(surr_sample)
-    elif scramble_breath_cycles:
-        print("Generating null samples by scrambling breathing cycles...")
-        breath_cycles = get_breathing_cycles(phase_pool)
-        cycle_array, cycle_boundaries = precompute_cycle_array(breath_cycles)
-
-        surr_samples = []
-        for _ in range(n_null):
-            scrambled_PA = make_scrambled_PA(cycle_array, cycle_boundaries, rng, len(phase_pool))
-            surr_samples.append(scrambled_PA[events])
-    else:
-        print("Generating null samples by random sampling from phase pool...")
-
-        surr_samples = [
-            rng.choice(phase_pool, size=n_events, replace=False) for _ in range(n_null)
-        ]
-
-    return surr_samples
-
-        
 
 
 def plot_participant_lvl(results, figpath=None, stat_fun_name="Maximum density"):
@@ -120,9 +59,8 @@ def plot_participant_lvl(results, figpath=None, stat_fun_name="Maximum density")
         )
   
 
-
         # ---- middle: Histogram of permutation statistics ----
-        ax_hist.hist(null_stats, bins=50, facecolor='lightgray', edgecolor='black', alpha=0.6, label=f"Null distribution ({stat_fun_name})")
+        ax_hist.hist(null_stats, bins=50, facecolor='lightgray', edgecolor='black', alpha=0.6, label=f"Surrogate distribution ({stat_fun_name})")
 
         ax_hist.axvline(obs_stat, color='forestgreen', linewidth=3, label=f"Observed statistic {stat_fun_name}")
 
@@ -176,7 +114,7 @@ def max_density(phases, return_density_at_phase: Union[bool, float] = False, ret
     return np.max(densities)
 
 
-def group_inference_z(obs_stats, null_stats, one_sided=True):
+def group_inference_z(obs_stats, surr_stats, one_sided=True):
     """
     Perform group-level inference by converting observed stats into per-subject z-scores
     relative to their own null distributions, then testing across participants.
@@ -185,7 +123,7 @@ def group_inference_z(obs_stats, null_stats, one_sided=True):
     ----------
     obs_stats : array-like, shape (n_subjects,)
         Observed statistic per subject.
-    null_stats : array-like, shape (n_subjects, n_nulls)
+    null_stats : array-like, shape (n_subjects, surr_stats)
         Null distribution statistics per subject.
     one_sided : bool
         If True, compute one-sided tests (testing whether observed > null).
@@ -198,12 +136,12 @@ def group_inference_z(obs_stats, null_stats, one_sided=True):
     """
 
     obs_stats = np.asarray(obs_stats)
-    null_stats = np.asarray(null_stats)
-    n_subj, n_nulls = null_stats.shape
+    surr_stats = np.asarray(surr_stats)
+    n_subj, n_surr = surr_stats.shape
 
     # Per-subject null mean & std
-    null_mean = null_stats.mean(axis=1)
-    null_std = null_stats.std(axis=1, ddof=1)
+    null_mean = surr_stats.mean(axis=1)
+    null_std = surr_stats.std(axis=1, ddof=1)
     # avoid divide-by-zero
     null_std[null_std == 0] = 1e-10
 
@@ -277,15 +215,14 @@ if __name__ == "__main__":
             raise ValueError(f"Length of events ({len(events)}) and circ_target ({len(circ_target)}) do not match for participant {participant}.")
 
         phase_ts = values["phase_ts"]
-        #phase_ts = phase_ts[~np.isnan(phase_ts)] # remove nans #REMEMBER TO TURN BACK ON IF NOT USING BREATH CYCLE SCRAMBLING
 
-        surr_samples = generate_surrogate_samples(
-            observed=circ_target.data,
+        surr_samples = surrogate_scramble_breath_cycles(
             phase_pool=phase_ts,
-            scramble_breath_cycles=True,
             events=events,
-            n_null=N_NULL,
+            n_surrogate=N_SURR,
+            rng=None,
         )
+
         pval, obs_stat, null_stats = test_against_surrogate(
             stat_fun=stat_fun,
             observed=circ_target.data,
@@ -294,7 +231,6 @@ if __name__ == "__main__":
             verbose=False,
         )
  
-
         circ_null = Circular.from_multiple(
             [Circular(samp, labels=[i]*len(samp)) for i, samp in enumerate(surr_samples)]
         )
@@ -315,13 +251,12 @@ if __name__ == "__main__":
         results, figpath=figpath, 
         stat_fun_name=stat_fun_name
         )
-
-
+    
     # group level inference
-    null_group = [results[subj_id]["null_stats"] for subj_id in results]
+    surr_group = [results[subj_id]["null_stats"] for subj_id in results]
     obs_group = [results[subj_id]["obs_stat"] for subj_id in results]
 
-    results_group = group_inference_z(obs_group, null_group, one_sided=True)
+    results_group = group_inference_z(obs_group, surr_group, one_sided=True)
     print("\nGroup-level inference results:")
     for k, v in results_group.items():
         print(f"{k}: {v}")
