@@ -277,26 +277,6 @@ def group_inference_z(obs_stats, null_stats, one_sided=True):
 
 
 
-def plot_permutation_result(null_distribution, observed_stat, pval, figpath=None):
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    ax.hist(null_distribution, bins=100, facecolor='lightgray', edgecolor='black', alpha=0.5)
-    ax.axvline(observed_stat, color='forestgreen', linewidth=3)
-
-    # add label
-    ax.text(observed_stat + ax.get_xlim()[1]/30, ax.get_ylim()[1]*0.9, 'Observed Statistic', color='forestgreen', ha='center')
-
-    ax.set_xlabel('Statistic Value')
-    ax.set_ylabel('Frequency')
-    ax.set_title(f'p={pval:.3f}')
-
-    plt.tight_layout()
-
-    if figpath is not None:
-        plt.savefig(figpath)
-    plt.close()
-
-
 if __name__ == "__main__":
     figpath = Path(__file__).parent / "results" / "h1"
     figpath.mkdir(parents=True, exist_ok=True)
