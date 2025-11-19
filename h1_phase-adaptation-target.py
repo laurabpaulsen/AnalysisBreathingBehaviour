@@ -1,5 +1,5 @@
 """
-This script tests H2:
+This script tests h1:
 * Across different ISIs, the breathing patterns of the participants will align to target stimuli such that it occurs preferentially at specific phases of the respiratory cycle.
 
 
@@ -298,7 +298,7 @@ def plot_permutation_result(null_distribution, observed_stat, pval, figpath=None
 
 
 if __name__ == "__main__":
-    figpath = Path(__file__).parent / "results" / "h2"
+    figpath = Path(__file__).parent / "results" / "h1"
     figpath.mkdir(parents=True, exist_ok=True)
 
     variables = ["circ", "phase_ts", "event_samples", "event_ids"]
@@ -378,6 +378,3 @@ if __name__ == "__main__":
     for k, v in results_group.items():
         print(f"{k}: {v}")
 
-
-    #plot_permutation_result(group_null, group_obs_stat, figpath=figpath / "h2_group_level.png", pval=group_pval)
-    #print(f"\n Group-level p-value: {group_pval}")
