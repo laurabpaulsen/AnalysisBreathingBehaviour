@@ -1,5 +1,5 @@
 """
-This script tests H4:
+This script tests H3:
 
 Respiration has functional relevance reflected in modulation of response time across different phases of the respiratory cycle.
 
@@ -138,7 +138,7 @@ if __name__ == "__main__":
     variables = ["rt", "circ", "intensity"]
     data = load_data(variables, dataset)
 
-    figpath = Path(__file__).parent / "results" / "h4"
+    figpath = Path(__file__).parent / "results" / "h3"
     figpath.mkdir(exist_ok=True, parents=True)
 
 

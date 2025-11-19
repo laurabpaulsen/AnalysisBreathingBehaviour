@@ -1,13 +1,7 @@
 """
-This script tests H3A:
+This script tests h2:
 
 Respiration has functional relevance reflected in systematic variations in sensory sensitivity across different phases of the respiratory cycle.
-
-
-Things to be decided
-* Should the intensity be normalised? Between 0 and the salient intensity?
-* In the ps refitting, should the parameters from the fit on the whole data be passed as priors or should the be locked (except for threshold ofc)
-
 """
 
 import numpy as np
@@ -28,11 +22,6 @@ N_NULL_LMEM = 10_000
 
 MIN_TRIALS_PER_BIN = 30
 
-psignifit_kwargs = {
-    'experiment_type': '2AFC', 
-    'stimulus_range': [0, 3], # CHANGE THIS!!
-
-}
 
 def LMEM(data):
 
@@ -49,11 +38,11 @@ def LMEM(data):
     return model.fit()
 
 def get_participant_salient_intensity(participant):
-    path = Path(__file__).parent / "simulation" / "data" / "raw" / f"participant_{participant}_events.csv"
+    path = Path(__file__).parent / "data" / "pilots" / "raw" / f"{participant}_behavioural_data.csv"
     participant_data = pd.read_csv(path)
 
     # intensity in first row
-    return participant_data["intensity"].iloc[0]
+    return participant_data["intensity"].max()
 
 
 def phase_bin_mask(phase_angles, center, width):
@@ -244,15 +233,23 @@ if __name__ == "__main__":
     dataset = "pilots"
     data = load_data(variables, dataset)
 
-    figpath = Path(__file__).parent / "results" / "h3"
+    figpath = Path(__file__).parent / "results" / "h2"
     figpath.mkdir(parents=True, exist_ok=True)
 
     # empty dataframe to store threshold estimates
     threshold_estimates = pd.DataFrame(columns=["participant", "center", "sin_phase", "cos_phase", "threshold", "zscored_threshold"])
 
+    
+
     for participant, values in tqdm(data.items(), desc="Fitting psychometric functions"):
         print(f"Processing participant {participant}...")
         circ, intensities = values["circ"], values["intensity"]
+
+        psignifit_kwargs = {
+            'experiment_type': '2AFC', 
+            'stimulus_range': [1, get_participant_salient_intensity(participant)],
+        }
+        print(f"Using stimulus range: [0, {get_participant_salient_intensity(participant)}]")
 
         idx_hit = [idx for idx, label in enumerate(circ.labels) if ("/correct" in label and "target" in label)]
         idx_miss = [idx for idx, label in enumerate(circ.labels) if ("/incorrect" in label and "target" in label)]
@@ -360,7 +357,7 @@ if __name__ == "__main__":
         data = threshold_estimates,
         dependent_variable="threshold",
         n_null=N_NULL_LMEM,
-        figpath=figpath / "h3_LMEM_phase_modulates_sensitivity.png",
-        txtpath=figpath / "h3_LMEM_results.txt",
+        figpath=figpath / "h2_LMEM_phase_modulates_sensitivity.png",
+        txtpath=figpath / "h2_LMEM_results.txt",
         n_jobs=-1
     )
