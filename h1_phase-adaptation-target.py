@@ -2,26 +2,20 @@
 This script tests h1:
 * Across different ISIs, the breathing patterns of the participants will align to target stimuli such that it occurs preferentially at specific phases of the respiratory cycle.
 
-
-
-CONSIDER 
-* Which method to use for null-sampling?
-* U2? 
-* Which method for comparing the two groups (mann-whitney, t-test, something different?) 
 """
 import numpy as np
 from utils import load_data, create_trigger_mapping
 from pathlib import Path
 import matplotlib.pyplot as plt
-from pyriodic.utils import calculate_p_value
 from pyriodic import Circular, CircPlot
 from pyriodic.density import vonmises_kde
-from tqdm import tqdm
-from scipy import stats
-from pyriodic.surrogate import get_breathing_cycles, precompute_cycle_array, make_scrambled_PA
 
+from pyriodic.surrogate import get_breathing_cycles, precompute_cycle_array, make_scrambled_PA
+from pyriodic.stats_surrogate import test_against_surrogate
 
 from typing import Union, Optional, Literal, Callable
+from tqdm import tqdm
+from scipy import stats
 
 # Parameters
 N_NULL = 5000
@@ -30,21 +24,17 @@ N_BINS = 100 # for density estimation
 KAPPA = 20  # for density estimation
 
 
-
-def test_against_null(
-    stat_fun: Callable,
+def generate_surrogate_samples(
     observed: np.ndarray,
     phase_pool: Union[np.ndarray, Literal["uniform"]] = "uniform",
     time_shift: bool = False,
     scramble_breath_cycles: bool = False,
     events = None,
     n_null: int = 1000,
-    alternative: Literal["greater", "less", "two-sided"] = "greater",
     rng: Optional[np.random.Generator] = None,
-    verbose: bool = True,
-    return_null_samples: bool = False):
+    ):
     
-
+        
     if rng is None:
         rng = np.random.default_rng()
 
@@ -65,7 +55,7 @@ def test_against_null(
     
     if time_shift:
         print("Generating null samples with time shifts...")
-        null_samples = []
+        surr_samples = []
 
         # get an integer shift for each null sample )(between 0 and the number of samples in PA)
         shifts = rng.integers(0, len(phase_pool), size=n_null)
@@ -73,50 +63,27 @@ def test_against_null(
             # shift PA by the random amount
             shifted = np.roll(phase_pool, shift)
             # sample the same number of phases as in the observed data
-            null_sample = shifted[events]
-            null_samples.append(null_sample)
+            surr_sample = shifted[events]
+            surr_samples.append(surr_sample)
     elif scramble_breath_cycles:
         print("Generating null samples by scrambling breathing cycles...")
         breath_cycles = get_breathing_cycles(phase_pool)
         cycle_array, cycle_boundaries = precompute_cycle_array(breath_cycles)
 
-        null_samples = []
+        surr_samples = []
         for _ in range(n_null):
             scrambled_PA = make_scrambled_PA(cycle_array, cycle_boundaries, rng, len(phase_pool))
-            null_samples.append(scrambled_PA[events])
+            surr_samples.append(scrambled_PA[events])
     else:
         print("Generating null samples by random sampling from phase pool...")
 
-        null_samples = [
+        surr_samples = [
             rng.choice(phase_pool, size=n_events, replace=False) for _ in range(n_null)
         ]
 
+    return surr_samples
 
-
-    obs_stat = stat_fun(observed)
-
-    # check if obs_stat is a tuple (some stat functions might return multiple values)
-    if isinstance(obs_stat, tuple):
-        obs_stat, max_angle = obs_stat
-        # Compute obs-vs-null test statistics
-        null_stats = np.apply_along_axis(
-            lambda row: stat_fun(row, return_density_at_phase=max_angle, return_angle=False), 1, null_samples
-        )
-
-    else:
-        # Compute obs-vs-null test statistics
-        null_stats = np.apply_along_axis(stat_fun, 1, null_samples)
-
-    p_val = calculate_p_value(obs_stat, null_stats, alternative)
-
-    if verbose:
-        print(f"p val: {p_val}, observed stat: {obs_stat:.3f}, mean null stat: {np.mean(null_stats):.3f}")
-
-    results = (p_val, obs_stat, null_stats)
-    if return_null_samples:
-        return results + (null_samples,)
-    else:
-        return results
+        
 
 
 def plot_participant_lvl(results, figpath=None, stat_fun_name="Maximum density"):
@@ -312,24 +279,25 @@ if __name__ == "__main__":
         phase_ts = values["phase_ts"]
         #phase_ts = phase_ts[~np.isnan(phase_ts)] # remove nans #REMEMBER TO TURN BACK ON IF NOT USING BREATH CYCLE SCRAMBLING
 
-        pval, obs_stat, null_stats, null_samples = test_against_null(
-                    observed=circ_target.data,
-                    phase_pool=phase_ts,
-                    stat_fun=stat_fun, 
-                    scramble_breath_cycles=True,
-                    events=events,
-                    n_null=N_NULL, 
-                    verbose=False, 
-                    alternative="greater",
-                    return_null_samples=True
-                )
+        surr_samples = generate_surrogate_samples(
+            observed=circ_target.data,
+            phase_pool=phase_ts,
+            scramble_breath_cycles=True,
+            events=events,
+            n_null=N_NULL,
+        )
+        pval, obs_stat, null_stats = test_against_surrogate(
+            stat_fun=stat_fun,
+            observed=circ_target.data,
+            surrogate_samples=np.array(surr_samples),
+            alternative="greater",
+            verbose=False,
+        )
  
 
         circ_null = Circular.from_multiple(
-            [Circular(samp, labels=[i]*len(samp)) for i, samp in enumerate(null_samples)]
+            [Circular(samp, labels=[i]*len(samp)) for i, samp in enumerate(surr_samples)]
         )
-        print(null_stats)
-        print(null_stats.shape)
 
         results[participant] = {
             "circ_target": circ_target,
@@ -337,7 +305,7 @@ if __name__ == "__main__":
             "pval": pval,
             "null_stats": null_stats,
             "obs_stat": obs_stat,
-            "null_samples": null_samples
+            "null_samples": surr_samples,
         }
 
     # sort the results dictionary by the participants so they are ordered
@@ -347,7 +315,7 @@ if __name__ == "__main__":
         results, figpath=figpath, 
         stat_fun_name=stat_fun_name
         )
-    print("Participant-level results saved.")
+
 
     # group level inference
     null_group = [results[subj_id]["null_stats"] for subj_id in results]
