@@ -15,9 +15,11 @@ def load_data(variables:list[str], dataset:str = "simulated", suffix = "preproc.
         datapath = Path(__file__).parent / "data" / "before_pilots" / "intermediate"
     elif dataset == "pilots":
         datapath = Path(__file__).parent / "data" / "pilots" / "intermediate"
-    elif dataset == "real":
-        raise NotImplementedError("Real dataset loading is not implemented yet.")
+    elif dataset == "raw":
+        datapath = Path(__file__).parent / "data" / "raw" / "intermediate"
     
+    else:
+        raise ValueError(f"Dataset '{dataset}' not recognised. Choose from 'simulated', 'before_pilots', 'pilots', or 'raw'.")
 
 
     # find all files in the path
