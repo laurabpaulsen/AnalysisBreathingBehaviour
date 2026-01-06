@@ -147,7 +147,7 @@ if __name__ == "__main__":
 
     plot_subject_RT_by_phase(
         data=data,
-        figpath=figpath / "h4_RT_by_phase_polar.png",
+        figpath=figpath / "h3_RT_by_phase_polar.png",
         filter_outliers=True,
         num_bins=20,
         stat="mean"
@@ -208,7 +208,7 @@ if __name__ == "__main__":
         data=LMEM_data,
         dependent_variable=RT_COL,
         n_null=N_NULL_LMEM, 
-        figpath=figpath / "h4_LMEM_phase_modulates_RT.png", 
-        txtpath=figpath / "h4_LMEM_phase_modulates_RT.txt",
+        figpath=figpath / "h3_LMEM_phase_modulates_RT.png", 
+        txtpath=figpath / "h3_LMEM_phase_modulates_RT.txt",
         n_jobs=-1
     )
