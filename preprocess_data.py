@@ -7,13 +7,11 @@ import mne
 
 from utils import create_trigger_mapping
 from pyriodic.preproc import RawSignal
-from pyriodic.viz import plot_phase_diagnostics, CircPlot
+from pyriodic.viz import plot_phase_diagnostics
 from pyriodic.phase_events import create_phase_events
 from bioread import read_file
 
-LOW_FREQ = 0.1
-HIGH_FREQ = 1
-WINDOW_SIZE_SMOOTHING = 200 #ms
+WINDOW_SIZE_SMOOTHING = 300 #ms
 
 
 def csv_to_events_array(df: pd.DataFrame, sfreq: float) -> np.ndarray:
@@ -64,51 +62,6 @@ def trigger_extraction(data, sfreq):
     
     return mne.find_events(raw_combined, shortest_event=1)
 
-"""
-def insert_missing_triggers(events_from_raw, events_from_csv):
-    updated_events = []
-    updated_events_description = []
-    i_raw, i_csv = 0, 0
-    mismatch_count = 0
-
-    while i_raw < len(events_from_raw) and i_csv < len(events_from_csv):
-        sample_raw, _, trig_raw = events_from_raw[i_raw]
-        sample_csv, _, trig_csv = events_from_csv[i_csv]
-
-        if trig_raw == trig_csv and abs(sample_raw - sample_csv) <= 100:
-            # perfect match
-            updated_events.append([sample_raw, 0, trig_raw])
-            i_raw += 1
-            i_csv += 1
-            updated_events_description.append("Perfect match")
-        elif abs(sample_raw - sample_csv) > 100:
-            # check which one has the lowest sample index
-            if sample_raw > sample_csv:
-                # insert CSV event
-                updated_events.append([sample_csv, 0, trig_csv])
-                i_csv += 1
-                mismatch_count += 1
-                updated_events_description.append("Inserted CSV event")
-            else:
-                # assume that a 
-                # insert raw event
-                #updated_events.append([sample_raw, 0, trig_raw])
-                i_raw += 1
-                mismatch_count += 1
-                updated_events_description.append("Inserted raw event")
-                #print("inserted_raw event")
-
-        else:
-            print(f"could not fix match with csv trig {trig_csv}, sample {sample_csv} and raw trig {trig_raw}, sample {sample_raw}\
-                  Moving on to the next csv index")
-            i_csv += 1
-
-    print(f"Mismatches resolved: {mismatch_count}")
-    updated_events = np.array(updated_events)
-       
-    return updated_events
-
-"""
 
 def align_csv_with_raw(events_from_raw, events_from_csv, max_delta=100):
     """
@@ -133,13 +86,19 @@ def align_csv_with_raw(events_from_raw, events_from_csv, max_delta=100):
     match_flags : np.ndarray (bool)
         True where raw timing was used, False where CSV timing was kept.
     """
+
+    events_from_csv[:, 0] = events_from_csv[:, 0] - events_from_csv[0, 0] + events_from_raw[0, 0]
+
     raw_samples = np.array([s for s, _, _ in events_from_raw])
     raw_triggers = np.array([t for _, _, t in events_from_raw])
 
     aligned_events = []
     match_flags = []
 
+
     for sample_csv, _, trig_csv in events_from_csv:
+ 
+
         # Find candidate matches
         mask = raw_triggers == trig_csv
         if not np.any(mask):
@@ -157,18 +116,20 @@ def align_csv_with_raw(events_from_raw, events_from_csv, max_delta=100):
             # Use raw timing
             aligned_events.append([candidates[idx_min], 0, trig_csv])
             match_flags.append(True)
+            
         else:
             # No close match → use CSV timing
             aligned_events.append([sample_csv, 0, trig_csv])
             match_flags.append(False)
+ 
 
-    return np.array(aligned_events), np.array(match_flags)
+    aligned_events = np.array(aligned_events)
+    match_flags = np.array(match_flags)    
+    
 
+    return aligned_events, match_flags
 
 def preprocess(raw):
-
-    print("Applying bandpass filter")
-    raw.filter_bandpass(low = LOW_FREQ, high = HIGH_FREQ)
     
     print("Smoothing")
     raw.smoothing(window_size = WINDOW_SIZE_SMOOTHING)
@@ -178,39 +139,8 @@ def preprocess(raw):
 
     return raw
 
-def sanity_check_phase_angle(resp_timeseries = None, normalised_ts = None, peaks = None, troughs = None, phase_angle = None, savepath = None):
-    fig, axes = plt.subplots(2, 1, figsize = (40, 4), dpi = 300)
 
-    for var, label, color in zip([resp_timeseries, normalised_ts], ["original timeseries", "normalised interpolated timeseries"], ["darkblue", "forestgreen", "k"]):
-        if var is not None:
-            axes[0].plot(var, label = label, linewidth=1, color = color, alpha = 0.6)
-    
-    for var, label in zip([peaks, troughs], ["peaks", "troughs"]):
-        tmp_y = [normalised_ts[i] for i in var]
-        axes[0].scatter(var, tmp_y, zorder=1, alpha=0.5, s=2, label = label)
-
-    if phase_angle is not None: 
-        axes[1].plot(phase_angle, color = "grey", linewidth = 1)
-        axes[1].set_ylabel("phase angle")
-
-    axes[0].legend()
-
-    for ax in axes:
-        ax.set_xlim((0, len(normalised_ts))) # will give problems if normalised timeseries is not provided...
-
-    plt.tight_layout()
-
-    if savepath:
-        savepath.parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(savepath)
-
-    else:
-        return fig, axes
-
-
-
-
-def extract_PA_events(trigger_mapping, phase, event_samples, event_ids, fig_path):
+def extract_PA_events(trigger_mapping, phase, event_samples, event_ids, metadata_df, fig_path=None):
 
     # flip so the trigger is the key
     condition_mapping = {v: k for k, v in trigger_mapping.items()}
@@ -219,7 +149,8 @@ def extract_PA_events(trigger_mapping, phase, event_samples, event_ids, fig_path
     n_responses = 0
     n_targets = 0
 
-    # for target events, check if there is a response after in event labels. If it is update the label by adding /hit or /miss accordingly. If there is no response, add /noresponse
+    # for target events, check if there is a response after in event labels. 
+    # update the label by adding /correct, /incorrect or /noresponse
     for i, label in enumerate(event_labels):
         if "response" in label:
             n_responses += 1
@@ -237,13 +168,14 @@ def extract_PA_events(trigger_mapping, phase, event_samples, event_ids, fig_path
                 event_labels[i] += "/noresponse"
 
     print(f"Number of targets: {n_targets}, number of responses: {n_responses}")
-    circ, rejected_indices = create_phase_events(
+    
+    circ = create_phase_events(
         phase_ts=phase,
-        events=event_samples,
+        events=np.array(event_samples),
         event_labels=np.array(event_labels),
         rejection_method="segment_duration_sd",
         rejection_criterion=3,
-        return_rejected=True
+        metadata=metadata_df
     )
 
     if fig_path:
@@ -251,36 +183,35 @@ def extract_PA_events(trigger_mapping, phase, event_samples, event_ids, fig_path
         plt.savefig(fig_path)
         plt.close()
 
-    return circ, rejected_indices
-
-
-def filter_by_rejection(event_samples, rejected_indices, *arrays):
-    mask_keep = [s not in rejected_indices for s in event_samples]
-    return ( [s for s, keep in zip(event_samples, mask_keep) if keep],
-             *([arr for arr, keep in zip(a, mask_keep) if keep] for a in arrays) )
+    return circ
 
 
 if __name__ == "__main__":
+    data_dir = Path(__file__).parent / "data" / "raw" 
 
-    dataset = "pilots" # can also be "before_pilots" "pilots" and "raw", "simulation"
-
-    # Paths
-    data_dir = Path(__file__).parent / "data" / dataset / "raw"
-
-    output_dir = data_dir.parent / "intermediate"
+    output_dir = data_dir / "intermediate"
     output_dir.mkdir(parents=True, exist_ok=True)
-    fig_dir = data_dir.parent / "fig"
+
+    fig_dir = data_dir / "fig"
     fig_dir.mkdir(parents=True, exist_ok=True)
-    participant_files = sorted(data_dir.glob("*.acq"))
-    trigger_mapping = create_trigger_mapping(simulated=True if dataset=="simulation" else False)
+    
+    trigger_mapping = create_trigger_mapping()
 
     # Parameters
     plot_phase_diag = True
 
     # Loop through each participant
-    for resp_path in participant_files:
-        participant_id = resp_path.stem.split("_")[0]
-        behav_path = data_dir / f"{participant_id}_behavioural_data.csv"
+    IDS_good = [
+        "VUS", "DGO", "QVG", "OJN", "LIM", "FUS", "HAS", 
+        "SXC", "NAL", "ULO", "KBY", "ZLP", "JAK", "LAM", 
+        "HUC", "ZEL", "KIL", "MAJ", "JQA", "PAX", "INH", 
+        "IJQ", "XIH", "LJB", "WRS"
+        ]
+    
+    for participant_id in ["PLO"]:#IDS_good:
+        #participant_id = resp_path.stem.split("_")[0]
+        behav_path = data_dir / "behavioural" / f"{participant_id[:3]}_behavioural_data.csv"
+        resp_path = data_dir / f"{participant_id}0000.acq"
         
 
         print(f"Processing participant {participant_id}...")
@@ -288,30 +219,56 @@ if __name__ == "__main__":
         # --- Load respiration data ---
         data = read_file(resp_path)
         sampling_rate = data.samples_per_second
-        print(f"Sampling rate: {sampling_rate} Hz")
         t, resp = data.time_index, data.channels[0].data  # assuming respiration is the first channel
 
-
         behav_data = pd.read_csv(behav_path)
-        rt = behav_data['rt'].values
-        print(len(rt), "responses found")
-        intensity = behav_data['intensity'].values
+        
+        # add the response time and correct from the response to the previous target
+        for i, row in behav_data.iterrows():
+            if row["event_type"] == "response":
+                rt = row["rt"]
+                correct = row["correct"]
+                
+                # check that the row before is a target
+                if "target" in behav_data.loc[i-1, "event_type"]:
+                    behav_data.loc[i-1, "rt"] = rt
+                    behav_data.loc[i-1, "correct"] = correct
 
         # --- create events ---
         print(f"Creating events for {participant_id}")
         events_from_raw = trigger_extraction(data, sfreq=sampling_rate)
 
+
+        # remove the first two events if they are break start and break end
+        if events_from_raw[0, -1] == trigger_mapping["break/start"] and events_from_raw[1, -1] == trigger_mapping["break/end"]:
+
+            # save the sample indices of the removed events
+            print("Removed initial break start and break end from raw events")
+            removed_events = events_from_raw[1]
+            events_from_raw = events_from_raw[2:]
+
+
         # updating events by inserting missing ones from the behavioural data
         print(f"Updating events by inserting missing ones from the behavioural data for {participant_id}")
         events_from_csv = csv_to_events_array(behav_data, sfreq=sampling_rate)
-        events_from_csv[:, 0] = events_from_csv[:, 0] - events_from_csv[0, 0] + events_from_raw[0, 0]
-        #events = insert_missing_triggers(events_from_csv=events_from_csv, events_from_raw=events_from_raw)
+        # remove experiment start from csv if it is there
+        if events_from_csv[0, -1] == trigger_mapping["experiment/start"]:
+            events_from_csv = events_from_csv[1:]
+            print("Removed experiment start from CSV events")
+
+        
         events, match_flags = align_csv_with_raw(events_from_raw, events_from_csv)
 
 
         event_samples = events[:, 0]
         event_ids = events[:, -1]
-        print(len(event_samples), "events found")
+
+
+        # add the sample for the experiment start 
+        if 'removed_events' in locals():
+            event_samples = np.insert(event_samples, 0, removed_events[0])
+            event_ids = np.insert(event_ids, 0, trigger_mapping["experiment/start"])
+            print("Added back removed initial break events to the aligned events")
 
         print(f"Matched {match_flags.sum()} / {len(match_flags)} events ({100*match_flags.mean():.1f}%).")
 
@@ -320,8 +277,23 @@ if __name__ == "__main__":
         raw = RawSignal(resp, fs=sampling_rate)
         raw = preprocess(raw)
 
+
         # --- Extract phase angles ---
-        phase, peaks, troughs = raw.phase_twopoint(prominence=0.3, distance=0.5)
+        if participant_id == "NAL" or participant_id == "PAX":
+            prominence, distance = 0.2, 0.3
+        elif participant_id == "LAM":
+            prominence, distance = 0.01, 0.3
+        elif participant_id == "JQA":
+            prominence, distance = 0.1, 0.3
+        elif participant_id == "WRS":
+            prominence, distance = 0.05, 0.3
+        elif participant_id == "SXC" or participant_id == "PLO":
+            prominence, distance = 0.2, 0.4
+        else:
+            prominence, distance = 0.3, 0.5
+        
+    
+        phase, peaks, troughs = raw.phase_twopoint(prominence=prominence, distance=distance)
 
         # set phase angles to NAN in breaks
         break_starts = event_samples[np.where(event_ids == trigger_mapping["break/start"])]
@@ -330,20 +302,16 @@ if __name__ == "__main__":
         for start, end in zip(break_starts, break_ends):
             phase[start:end], raw.ts[start:end] = np.nan, np.nan
 
-        # set phase angles to nan before experiement start and experiment end
-        if participant_id == "SIL":
-            exp_start, exp_end = 623186, 3307725
-
-        elif participant_id == "JES":
-            exp_start, exp_end = 162331, 2913923 
+        # set phase angles to nan before experiment start and experiment end
+        try: 
+            exp_start = int(event_samples[np.where(event_ids == trigger_mapping["experiment/start"])][0])
+            exp_end = int(event_samples[np.where(event_ids == trigger_mapping["experiment/end"])][0])
         
-        else:
-            exp_start = int(event_samples[np.where(event_ids == trigger_mapping["experiment/start"])])
-            exp_end = int(event_samples[np.where(event_ids == trigger_mapping["experiment/end"])])
-        
-        phase[:exp_start], phase[exp_end:] = np.nan, np.nan
-        raw.ts[:exp_start], raw.ts[exp_end:] = np.nan, np.nan
-
+            phase[:exp_start], phase[exp_end:] = np.nan, np.nan
+            raw.ts[:exp_start], raw.ts[exp_end:] = np.nan, np.nan
+        except:
+            print("No experiment start or end trigger found")
+            
         # check how preprocessing went by plotting
         if plot_phase_diag:
             plot_phase_diagnostics(
@@ -361,46 +329,35 @@ if __name__ == "__main__":
             event_labels=event_ids
             )
 
+        behav_data['event_samples'] = event_samples
+        behav_data['event_ids'] = event_ids
+
+        
+
         # --- Extract phase events ---
-        circ, rejected_indices = extract_PA_events(
+        circ = extract_PA_events(
             trigger_mapping=trigger_mapping,
             phase=phase,
             event_samples=event_samples,
             event_ids=event_ids,
             fig_path=fig_dir / f"{participant_id}_circ_plot.png",
+            metadata_df=behav_data
         )
         
-        # find the indices of where event_samples is equal to the rejected_indices
-        #idx_rejected = np.array([i for i, sample in enumerate(event_samples) if sample in rejected_indices])
-
-        print(f"\n{[len(arr) for arr in [rt, intensity, event_ids]]} lle of arrays \n")
-        event_samples_no_rejected, rt_no_rejected, intensity_no_rejected, event_ids_no_rejected = \
-            filter_by_rejection(event_samples, rejected_indices, rt, intensity, event_ids)
-
-
         # --- Save to pickle ---
         output_file = output_dir / f"{participant_id}_preproc.pkl"
         with open(output_file, "wb") as f:
             pickle.dump({
                 "t": t,
                 "raw": resp,
-                # "rejected_idx": np.array(idx_rejected),
-                "event_samples_all": event_samples,
-                "event_ids_all": event_ids,
-                "event_ids": event_ids_no_rejected,
-                "event_samples": event_samples_no_rejected,
                 "preprocessed": raw.ts,
                 "phase_ts": phase,
                 "peaks": peaks,
                 "troughs": np.array(troughs),
                 "circ": circ,
-                "rt": np.array(rt_no_rejected),
-                "intensity": np.array(intensity_no_rejected),
                 "sfreq": sampling_rate,
 
             }, f)
-
-        print(circ)
 
         print(f"Saved to: {output_file.name}")
   
