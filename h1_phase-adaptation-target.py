@@ -4,7 +4,7 @@ This script tests h1:
 
 """
 import numpy as np
-from utils import load_data, create_trigger_mapping
+from utils import load_data
 from pathlib import Path
 import matplotlib.pyplot as plt
 
@@ -15,20 +15,19 @@ from scipy import stats
 
 from pyriodic import Circular, CircPlot
 from pyriodic.density import vonmises_kde
-from pyriodic.surrogate import surrogate_scramble_breath_cycles
+from pyriodic.surrogate import surrogate_shuffle_breath_cycles
 from pyriodic.stats_surrogate import test_against_surrogate
 
 # Parameters
 N_SURR = 5000
-N_PERMUTATIONS = 10000
-N_BINS = 100 # for density estimation
+N_BINS = 200 # for density estimation
 KAPPA = 20  # for density estimation
 
 
-def plot_participant_lvl(results, figpath=None, stat_fun_name="Maximum density"):
+def plot_participant_lvl(results, figpath=None, stat_fun_name="Maximum density", ylim=None):
     """Plot participant-level circular mean + permutation null distribution."""
     for participant, values in results.items():
-        fig = plt.figure(figsize=(15, 4))
+        fig = plt.figure(figsize=(12, 6))
         ax_circ = fig.add_subplot(1, 2, 1, projection="polar")
         ax_hist = fig.add_subplot(1, 2, 2)
 
@@ -44,22 +43,27 @@ def plot_participant_lvl(results, figpath=None, stat_fun_name="Maximum density")
 
 
         # loop over the null samples and plot their maximum density and angle as a point on the circular plot
-        for null_sample in null_samples:
-            max_dens, max_angle = max_density(null_sample, return_angle=True)
-            ax_circ.scatter(
-                max_angle, max_dens,
-                color="lightgray", alpha=0.1, s=10
-            )
+        for i, null_sample in enumerate(null_samples):
+            if i < 1000:
+                max_dens, max_angle = max_density(null_sample, return_angle=True)
+                ax_circ.scatter(
+                    max_angle, max_dens,
+                    color="lightgray", alpha=0.1, s=10,
+                    label=f"Surrogate {stat_fun_name} (1000 out of {len(null_samples)})" if i == 0 else ""
+                )
 
         # highlight the point with the maximum density
         max_dens, max_angle = max_density(circ_target.data, return_angle=True)
         ax_circ.scatter(
             max_angle, max_dens,
-            color="darkred", s=20, label="Observed max density"
+            color="darkred", s=25, label="Observed max density", zorder=2.5
         )
-  
+        ax_circ.legend()
 
-        # ---- middle: Histogram of permutation statistics ----
+        # set ylim
+        if ylim is not None:
+            ax_circ.set_ylim(ylim)
+  
         ax_hist.hist(null_stats, bins=50, facecolor='lightgray', edgecolor='black', alpha=0.6, label=f"Surrogate distribution ({stat_fun_name})")
 
         ax_hist.axvline(obs_stat, color='forestgreen', linewidth=3, label=f"Observed statistic {stat_fun_name}")
@@ -69,20 +73,91 @@ def plot_participant_lvl(results, figpath=None, stat_fun_name="Maximum density")
         ax_hist.set_ylabel("Frequency")
         ax_hist.legend()
 
-        # ---- Right: Permutation test result ----
-        #ax_perm.hist(perm_stats, bins=50, facecolor='lightgray', edgecolor='black', alpha=0.6)
-        #ax_perm.axvline(obs_stat, color='forestgreen', linewidth=3, label=f"Observed statistic {perm_stat_name}")
-        #ax_perm.set_title(f"Permutation test p={pval:.3f}")
-        #ax_perm.set_xlabel("Statistic Value")
-        #ax_perm.set_ylabel("Frequency")
-        #ax_perm.legend()
+    
 
 
         plt.tight_layout()
         if figpath is not None:
             plt.savefig(figpath / f"{participant}_perm_result.png")
+            plt.savefig(figpath / f"{participant}_perm_result.svg")
         plt.close()
 
+def plot_group_zscores(results_group, participant_ids=None, savepath=None):
+    """
+    Plot group-level standardized effects (z-scores).
+    This is Panel D.
+    """
+    z = np.asarray(results_group["z_scores"])
+    n = len(z)
+
+    if participant_ids is None:
+        participant_ids = [f"{i+1}" for i in range(n)]
+
+    # colours for grouped
+    colours = plt.cm.get_cmap('tab20', len(results))
+    colours = [colours(i) for i in range(len(results))]
+
+    # Mean and 95% CI
+    mean_z = z.mean()
+    sem_z = z.std(ddof=1) / np.sqrt(n)
+    ci_low, ci_high = stats.t.interval(
+        0.95, df=n-1, loc=mean_z, scale=sem_z
+    )
+
+    # Sort by z-score for readability
+    order = np.argsort(z)
+    z_sorted = z[order]
+    ids_sorted = np.array(participant_ids)[order]
+    y = np.arange(n)
+
+    colours_sorted = np.array(colours)[order]
+
+    fig, ax = plt.subplots(figsize=(4, 6), dpi=300)
+
+    # Individual participants
+    ax.scatter(
+        z_sorted, y,
+        color=colours_sorted,
+        s=35,
+        zorder=3
+    )
+
+    # Zero line
+    ax.axvline(0, color="gray", linestyle="--", linewidth=1)
+
+    # Group mean and CI
+    ax.axvline(mean_z, color="darkgray", linewidth=2, label="Group mean")
+    ax.fill_betweenx(
+        [-1, n],
+        ci_low, ci_high,
+        color="darkgray",
+        alpha=0.2,
+        label="95% CI"
+    )
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(ids_sorted)
+    ax.set_xlabel("Z-score (subject-wise standardized effect)")
+    ax.set_ylabel("Participant")
+
+    ax.set_xlim(
+        min(-1, z.min() - 0.5),
+        max(1, z.max() + 0.5)
+    )
+
+    ax.set_title(
+        f"Mean z = {mean_z:.2f}, "
+        f"p = {results_group['p_w']:.3f}"
+    )
+
+    ax.legend(frameon=False)
+    plt.tight_layout()
+
+    if savepath is not None:
+        plt.savefig(savepath / "group_zscores.png")
+        plt.savefig(savepath / "group_zscores.svg")
+
+    plt.close()
 
 def max_density(phases, return_density_at_phase: Union[bool, float] = False, return_angle: bool = False) -> Union[float, tuple[float, float]]:
     """
@@ -114,7 +189,7 @@ def max_density(phases, return_density_at_phase: Union[bool, float] = False, ret
     return np.max(densities)
 
 
-def group_inference_z(obs_stats, surr_stats, one_sided=True):
+def group_inference_z(obs_stats, surr_stats, one_sided=True, zscore_path=None):
     """
     Perform group-level inference by converting observed stats into per-subject z-scores
     relative to their own null distributions, then testing across participants.
@@ -180,19 +255,52 @@ def group_inference_z(obs_stats, surr_stats, one_sided=True):
         "n_subjects": n_subj
     }
 
+    # save z_scores for each participant
+    if zscore_path is not None:
+        np.savetxt(zscore_path / "participant_zscores.txt", z_scores)
+    
+
+
+def circplot_group_level(results, savepath=None, return_ylim: bool = False):
+    """Plot group-level circular density across participants."""
+    fig = plt.figure(figsize=(12, 6), dpi=300)
+    ax = fig.add_subplot(1, 1, 1, projection="polar")
+
+    all_phases = np.concatenate([values["circ_target"].data for values in results.values()])
+    labels = np.concatenate([[i+1]*len(values["circ_target"]) for i, (subj_id, values) in enumerate(results.items())])
+    
+    # colours for grouped
+    colours = plt.cm.get_cmap('tab20', len(results))
+    colours = [colours(i) for i in range(len(results))]
+
+    circ_all = Circular(all_phases, labels=labels)
+    plot_tmp = CircPlot(circ_all, ax=ax, group_by_labels=False, colours=colours)
+
+    plot_tmp.add_density(color="k", kappa=KAPPA, n_bins=N_BINS, label="Density (all participants)", linewidth=2)
+    plot_tmp.add_density(kappa=KAPPA, n_bins=N_BINS, linewidth=1.5, grouped=True, alpha=0.7)
+    plot_tmp.add_legend(loc="upper left", bbox_to_anchor=(1.1, 1.1), fontsize=8)
+
+    plt.tight_layout()
+    if savepath is not None:
+        plt.savefig(savepath / "group_level_density.png")
+        plt.savefig(savepath / "group_level_density.svg")
+
+    if return_ylim:
+        ylim = ax.get_ylim()
+        plt.close()
+        return ylim
+    
+    plt.close()
 
 
 if __name__ == "__main__":
     figpath = Path(__file__).parent / "results" / "h1"
-    figpath.mkdir(parents=True, exist_ok=True)
+    figpath_participant = figpath / "participant_level"
+    figpath_participant.mkdir(parents=True, exist_ok=True)
 
-    variables = ["circ", "phase_ts", "event_samples", "event_ids"]
-    dataset = "pilots"
+    variables = ["circ", "phase_ts"]
+    dataset = "raw"
     data = load_data(variables, dataset)
-
-    trigger_mapping = create_trigger_mapping()
-    # opposite of what we had before, because we want to align to target events
-    targets_id  = [v for k, v in trigger_mapping.items() if "target" in k]
 
     stat_fun = max_density
     stat_fun_name = "max density"
@@ -200,23 +308,13 @@ if __name__ == "__main__":
 
     results = {}
 
-    for participant, values in tqdm(data.items(), desc="Participant:"):
+    for participant, values in tqdm(data.items()):
         circ = values["circ"]
         circ_target = circ["target"]
-        events = values["event_samples"]
-        events_ids = values["event_ids"]
-
-        # only keep events that are target events
-        idx_target = np.array([i for i, eid in enumerate(events_ids) if eid in targets_id])
-        events = np.array(events)[idx_target]
-
-        # check that the lengts of events and circ_target are the same
-        if len(events) != len(circ_target):
-            raise ValueError(f"Length of events ({len(events)}) and circ_target ({len(circ_target)}) do not match for participant {participant}.")
-
+        events = circ_target.metadata["event_samples"]
         phase_ts = values["phase_ts"]
 
-        surr_samples = surrogate_scramble_breath_cycles(
+        surr_samples = surrogate_shuffle_breath_cycles(
             phase_pool=phase_ts,
             events=events,
             n_surrogate=N_SURR,
@@ -247,17 +345,27 @@ if __name__ == "__main__":
     # sort the results dictionary by the participants so they are ordered
     results = dict(sorted(results.items()))
 
-    plot_participant_lvl(
-        results, figpath=figpath, 
-        stat_fun_name=stat_fun_name
-        )
+    
     
     # group level inference
     surr_group = [results[subj_id]["null_stats"] for subj_id in results]
     obs_group = [results[subj_id]["obs_stat"] for subj_id in results]
 
-    results_group = group_inference_z(obs_group, surr_group, one_sided=True)
+    results_group = group_inference_z(obs_group, surr_group, one_sided=True, zscore_path=figpath)
+    
+    plot_group_zscores(
+        results_group,
+        savepath=figpath
+    )
+    
     print("\nGroup-level inference results:")
     for k, v in results_group.items():
         print(f"{k}: {v}")
 
+    ylim = circplot_group_level(results, savepath=figpath, return_ylim=True)
+
+    plot_participant_lvl(
+        results, figpath=figpath_participant, 
+        stat_fun_name=stat_fun_name,
+        ylim=ylim
+        )
