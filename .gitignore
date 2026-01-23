@@ -174,7 +174,8 @@ cython_debug/
 .pypirc
 
 data/*
-results/*
+results/h2*
+results/h3*
 trash/*
 simulation/data
 
