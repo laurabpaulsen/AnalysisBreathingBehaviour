@@ -176,15 +176,7 @@ cython_debug/
 data/*
 results/h2*
 results/h3*
+results/posthoc*
 trash/*
-simulation/data
-
+posthoc/*
 .DS_Store
-
-h2_testing/*
-iaaft*
-
-dk_exampledata/*
-
-pilots_exploration.ipynb
-look_at_new_data.ipynb
