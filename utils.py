@@ -29,14 +29,15 @@ def load_data(variables:list[str], dataset:str = "simulated", suffix = "preproc.
 
     data = {}
 
-    for file in files:
-        with open(file, "rb") as f:
+    # sort the files to ensure consistent order
+    files = sorted(files)
 
-            # get the participant label
-            participant = file.stem.split("_")[0]
+    for i, file in enumerate(files):
+        with open(file, "rb") as f:
+            # get the participant labelª
             file_data = pkl.load(f)
             data_tmp = {var: file_data[var] for var in variables if var in file_data}
-            data[participant] = data_tmp
+            data[i+1] = data_tmp
     
     return data
 
