@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
 from utils import load_data, create_trigger_mapping
+import pandas as pd
 
 trigger_mapping = create_trigger_mapping()
 trigger_mapping = {v: k for k, v in trigger_mapping.items()}
@@ -209,20 +210,98 @@ def plot_QUEST_moving_window(circ, figpath=None):
     plt.savefig(figpath)
     plt.close(fig)
     
+
+def plot_trials_per_ISI(data, figpath=None):
+    df_all = pd.DataFrame()
+
+    for ID, dat in data.items():
+        behav_data = dat["behav_data"]
+        behav_data["ID"] = ID
+        df_all = pd.concat([df_all, behav_data], ignore_index=True)
     
+    
+    df_counts = (
+        df_all
+        .loc[df_all["event_type"] == "response"]            # keep trials with responses
+        .groupby(["ID", "ISI"])
+        .size()
+        .unstack(fill_value=0)
+        .astype(int)
+        .sort_index(axis=1)                                 # ISIs in ascending order
+    )
+
+    # also make a group level mean 
+    df_counts.loc["group_mean"] = df_counts.mean(axis=0)
+    fig, ax = plt.subplots(figsize=(16, 6), dpi = 300)
+
+    # reorder: subjects first, group mean last
+    df_plot = df_counts.copy()
+    subject_idx = [i for i in df_plot.index if i != "group_mean"]
+    df_plot = df_plot.loc[subject_idx + ["group_mean"]]
+
+    isi_levels = sorted(df_plot.columns)
+
+    x = np.arange(len(df_plot))
+    width = 0.2
+
+    cmap  = plt.colormaps["Greens"]
+    color_vals = np.linspace(0.35, 0.9, len(isi_levels))
+
+    for i, (isi, cval) in enumerate(zip(isi_levels, color_vals)):
+        bars = ax.bar(
+            x + i * width,
+            df_plot[isi].values,
+            width,
+            color=cmap(cval),
+            label=f'{isi}'
+        )
+
+        # hatch the group mean bars
+        bars[-1].set_hatch("//")
+        bars[-1].set_edgecolor("black")
+
+    # x-axis formatting
+    ax.set_xticks(x + width * (len(isi_levels) - 1) / 2)
+    ax.set_xticklabels(df_plot.index, rotation=45)
+
+    ax.set_xlabel('Participant')
+    ax.set_ylabel('Number of responses')
+   
+
+    ax.axhline(
+        y=104,
+        color='grey',
+        linestyle='--',
+        label='Targets presented per ISI'
+    )
+    
+    ax.legend(ncols=1, bbox_to_anchor=(1, 1), loc='upper left')
+    # remove top and right spines
+    ax.spines[['top', 'right']].set_visible(False)
+
+    plt.tight_layout()
+
+    
+    if figpath:
+        plt.savefig(figpath, bbox_inches="tight")
 
 if __name__ == "__main__":
     outdir = Path(__file__).parent / "results" / "methods_fig"
     outdir.mkdir(exist_ok=True, parents=True)
 
-    variables = ["peaks", "troughs", "event_samples_all", "event_ids_all",
-                 "preprocessed", "phase_ts"]
+    #variables = ["peaks", "troughs", "event_samples_all", "event_ids_all",
+    #             "preprocessed", "phase_ts"]
     
-    data = load_data(variables, "pilots")
-    plot_surrogate_procedure(data["JES"], outdir / "surrogate_procedure.svg")
+    #data = load_data(variables, "pilots")
+    #plot_surrogate_procedure(data["JES"], outdir / "surrogate_procedure.svg")
 
 
     data = load_data(["circ"], "raw")
 
-    participant_id = list(data.keys())[12]
+    participant_id = 5
     plot_QUEST_moving_window(data[participant_id]["circ"], outdir / "QUEST_moving_window.svg")
+
+    variables = ["behav_data"] 
+    data = load_data(variables, "raw")
+
+    plot_trials_per_ISI(data, outdir / "trials_per_ISI.svg")
