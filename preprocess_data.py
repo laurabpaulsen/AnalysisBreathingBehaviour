@@ -12,7 +12,12 @@ from pyriodic.phase_events import create_phase_events
 from bioread import read_file
 
 WINDOW_SIZE_SMOOTHING = 300 #ms
-
+IDS = [
+    "VUS", "DGO", "QVG", "OJN", "LIM", "FUS", "HAS", 
+    "SXC", "NAL", "ULO", "KBY", "ZLP", "JAK", "LAM", 
+    "HUC", "ZEL", "KIL", "MAJ", "JQA", "PAX", "INH", 
+    "IJQ", "XIH", "LJB", "WRS", "PLO"
+    ]
 
 def csv_to_events_array(df: pd.DataFrame, sfreq: float) -> np.ndarray:
     """
@@ -140,35 +145,54 @@ def preprocess(raw):
     return raw
 
 
-def extract_PA_events(trigger_mapping, phase, event_samples, event_ids, metadata_df, fig_path=None):
+def update_event_labels(event_ids, trigger_mapping, behav_data):
 
+    # check that behav_data has same length as event_ids
+    if len(behav_data) != len(event_ids):
+        print("Warning: behavioural data length does not match event IDs length.")
+        print(f"Behavioural data length: {len(behav_data)}, Event IDs length: {len(event_ids)}")
     # flip so the trigger is the key
     condition_mapping = {v: k for k, v in trigger_mapping.items()}
 
-    event_labels = [condition_mapping.get(trig, "unknown") for trig in event_ids]
+    event_labels = [condition_mapping[eid] if eid in condition_mapping else f"unknown_{eid}" for eid in event_ids]
+
+    updated_labels = event_labels.copy()
+
     n_responses = 0
     n_targets = 0
 
     # for target events, check if there is a response after in event labels. 
     # update the label by adding /correct, /incorrect or /noresponse
+    # also add ISI before target label
     for i, label in enumerate(event_labels):
         if "response" in label:
             n_responses += 1
             
         if "target" in label:
+            isi = behav_data.loc[i, "ISI"]
             n_targets += 1
+            new_label = f"{isi}/{label}"
             if (i+1 < len(event_labels)):
                 if "incorrect" in event_labels[i+1]:
-                    event_labels[i] += "/incorrect"
+                    updated_labels[i]=new_label + "/incorrect"
                 elif "correct" in event_labels[i+1]:
-                    event_labels[i] += "/correct"
+                    updated_labels[i]=new_label + "/correct"
                 else:
-                    event_labels[i] += "/noresponse"
+                    updated_labels[i]=new_label + "/noresponse"
             else:
-                event_labels[i] += "/noresponse"
+                updated_labels[i]=new_label + "/noresponse"
+
+        if "salient" in label:
+            isi = behav_data.loc[i, "ISI"]
+            new_label = f"{isi}/{label}"
+            updated_labels[i]=new_label
 
     print(f"Number of targets: {n_targets}, number of responses: {n_responses}")
-    
+    print(np.unique(updated_labels, return_counts=True))
+    return updated_labels
+
+def extract_PA_events(phase, event_samples, event_labels, metadata_df, fig_path=None):
+
     circ = create_phase_events(
         phase_ts=phase,
         events=np.array(event_samples),
@@ -198,17 +222,9 @@ if __name__ == "__main__":
     trigger_mapping = create_trigger_mapping()
 
     # Parameters
-    plot_phase_diag = True
-
-    # Loop through each participant
-    IDS_good = [
-        "VUS", "DGO", "QVG", "OJN", "LIM", "FUS", "HAS", 
-        "SXC", "NAL", "ULO", "KBY", "ZLP", "JAK", "LAM", 
-        "HUC", "ZEL", "KIL", "MAJ", "JQA", "PAX", "INH", 
-        "IJQ", "XIH", "LJB", "WRS"
-        ]
+    plot_phase_diag = False
     
-    for participant_id in ["PLO"]:#IDS_good:
+    for i_subj, participant_id in enumerate(IDS):
         #participant_id = resp_path.stem.split("_")[0]
         behav_path = data_dir / "behavioural" / f"{participant_id[:3]}_behavioural_data.csv"
         resp_path = data_dir / f"{participant_id}0000.acq"
@@ -255,10 +271,8 @@ if __name__ == "__main__":
         if events_from_csv[0, -1] == trigger_mapping["experiment/start"]:
             events_from_csv = events_from_csv[1:]
             print("Removed experiment start from CSV events")
-
         
         events, match_flags = align_csv_with_raw(events_from_raw, events_from_csv)
-
 
         event_samples = events[:, 0]
         event_ids = events[:, -1]
@@ -311,7 +325,18 @@ if __name__ == "__main__":
             raw.ts[:exp_start], raw.ts[exp_end:] = np.nan, np.nan
         except:
             print("No experiment start or end trigger found")
-            
+
+        event_labels = update_event_labels(event_ids, trigger_mapping, behav_data)
+        
+        # add intensity information to the response events in the behav_data
+        intensity = []
+        for i in range(len(behav_data)):
+            if "response" in behav_data.iloc[i]["event_type"]:
+                intensity.append(behav_data.iloc[i-1]["intensity"])
+            else:
+                intensity.append(behav_data.iloc[i]["intensity"])
+        behav_data["intensity"] = intensity
+        
         # check how preprocessing went by plotting
         if plot_phase_diag:
             plot_phase_diagnostics(
@@ -326,26 +351,24 @@ if __name__ == "__main__":
             peaks=peaks,
             troughs=troughs,
             events=event_samples,
-            event_labels=event_ids
+            event_labels=[lab.split('/')[0] for lab in event_labels],  # only plot the main label
             )
 
         behav_data['event_samples'] = event_samples
         behav_data['event_ids'] = event_ids
 
-        
-
+    
         # --- Extract phase events ---
         circ = extract_PA_events(
-            trigger_mapping=trigger_mapping,
             phase=phase,
             event_samples=event_samples,
-            event_ids=event_ids,
-            fig_path=fig_dir / f"{participant_id}_circ_plot.png",
-            metadata_df=behav_data
+            event_labels=event_labels,
+            fig_path=fig_dir / f"{i_subj+1}_circ_plot.png",
+            metadata_df=behav_data.copy()
         )
         
         # --- Save to pickle ---
-        output_file = output_dir / f"{participant_id}_preproc.pkl"
+        output_file = output_dir / f"{i_subj+1}_preproc.pkl"
         with open(output_file, "wb") as f:
             pickle.dump({
                 "t": t,
@@ -356,6 +379,7 @@ if __name__ == "__main__":
                 "troughs": np.array(troughs),
                 "circ": circ,
                 "sfreq": sampling_rate,
+                "behav_data": behav_data
 
             }, f)
 
