@@ -27,21 +27,21 @@ KAPPA = 20  # for density estimation
 # set random seed for reproducibility
 np.random.seed(42)
 
-def plot_participant_lvl(results, figpath=None, stat_fun_name="Maximum density", ylim=None, colours=None):
+def plot_participant_lvl(results, figpath=None, stat_fun_name="Maximum density", ylim=None, colours=None, circ_key="circ_target"):
     """Plot participant-level circular mean + permutation null distribution."""
     for participant, values in results.items():
         fig = plt.figure(figsize=(12, 6))
         ax_circ = fig.add_subplot(1, 2, 1, projection="polar")
         ax_hist = fig.add_subplot(1, 2, 2)
 
-        circ_target = values["circ_target"]
+        circ = values[circ_key]
         pval = values["pval"]
         null_stats = values["null_stats"]
         obs_stat = values["obs_stat"]
         null_samples = values["null_samples"]
 
         # ---- Left: Circular Plot ----
-        plot_tmp = CircPlot(circ_target, ax=ax_circ, title=f"{participant} (p={pval:.3f})", group_by_labels=False)
+        plot_tmp = CircPlot(circ, ax=ax_circ, title=f"{participant} (p={pval:.3f})", group_by_labels=False)
         plot_tmp.add_density(color=colours[participant-1] if colours is not None else "forestgreen", kappa=KAPPA, n_bins=N_BINS, label="Observed", linewidth=2)
 
 
@@ -56,7 +56,7 @@ def plot_participant_lvl(results, figpath=None, stat_fun_name="Maximum density",
                 )
 
         # highlight the point with the maximum density
-        max_dens, max_angle = max_density(circ_target.data, return_angle=True)
+        max_dens, max_angle = max_density(circ.data, return_angle=True)
         ax_circ.scatter(
             max_angle, max_dens,
             color="darkred", s=25, label="Observed max density", zorder=2.5
@@ -270,13 +270,13 @@ def group_inference_z(obs_stats, surr_stats, one_sided=True, subj_labels = None,
 
 
 
-def circplot_group_level(results, savepath=None, return_ylim: bool = False, colours=None):
+def circplot_group_level(results, savepath=None, return_ylim: bool = False, colours=None, circ_key="circ_target"):
     """Plot group-level circular density across participants."""
     fig = plt.figure(figsize=(12, 6), dpi=300)
     ax = fig.add_subplot(1, 1, 1, projection="polar")
 
-    all_phases = np.concatenate([values["circ_target"].data for values in results.values()])
-    labels = np.concatenate([[i+1]*len(values["circ_target"]) for i, (subj_id, values) in enumerate(results.items())])
+    all_phases = np.concatenate([values[circ_key].data for values in results.values()])
+    labels = np.concatenate([[i+1]*len(values[circ_key]) for i, (subj_id, values) in enumerate(results.items())])
     
     # colours for grouped
     if colours is None:

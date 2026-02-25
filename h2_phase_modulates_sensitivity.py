@@ -21,19 +21,29 @@ WIDTH = np.pi/4
 N_NULL_LMEM = 10_000
 
 MIN_TRIALS_PER_BIN = 30
+SIMPLE_MODEL = True
 
 
-def LMEM(data):
+def LMEM(data, simple_model=SIMPLE_MODEL):
+    
+    if simple_model:
+        model = smf.mixedlm(
+            "threshold ~ sin_phase + cos_phase",  # Fixed effects
+            data=data,
+            groups=data["participant"]  # Random intercepts only
+        )
+        # model specification in R would be
+        # threshold ~ sin_phase + cos_phase + (1 | participant)
+    else:
+        model = smf.mixedlm(
+            "threshold ~ sin_phase + cos_phase",  # Fixed effects
+            data=data,
+            groups=data["participant"],  # Random effects
+            re_formula="~ sin_phase + cos_phase"  # Random slopes  
+        )
 
-    model = smf.mixedlm(
-        "threshold ~ sin_phase + cos_phase",  # Fixed effects
-        data=data,
-        groups=data["participant"],  # Random effects
-        re_formula="~ sin_phase + cos_phase"  # Random slopes  
-    )
-
-    # model specification in R would be
-    # threshold ~ sin_phase + cos_phase + (sin_phase + cos_phase | participant)
+        # model specification in R would be
+        # threshold ~ sin_phase + cos_phase + (sin_phase + cos_phase | participant)
 
     return model.fit()
 
@@ -66,7 +76,7 @@ def format_data_for_psignifit(intensities, hit_or_miss):
     return formatted_data
 
 
-def plot_subject_level(refitted_results, full_fitted_result, center_of_bins, participant=None, figpath=None):   
+def plot_subject_level(refitted_results, full_fitted_result, center_of_bins, participant=None, figpath=None, ymax_inset=None):   
     fig, ax = plt.subplots(figsize=(8, 6))
 
     cmap = plt.cm.twilight
@@ -134,24 +144,11 @@ def plot_subject_level(refitted_results, full_fitted_result, center_of_bins, par
     # add hline at the threshold of the full data fit
     plot.add_hline(full_fitted_result.parameter_estimate['threshold'], c = "k", linestyle='--', linewidth=1,)
 
-    inset_ax.set_ylim(np.min(thresholds) * 0.7, np.max(thresholds) * 1.3)
-    
-    # change theta direction to match remaining plots
-    #inset_ax.set_theta_direction(-1)
-
-    # Make a colormap around the circle
-    #inset_ax.scatter(theta, radii, c=theta, cmap=cmap, norm=norm, s=15)
-    #inset_ax.set_yticklabels([])  # remove radius labels
-    #inset_ax.set_xticks([0, np.pi])
-    #inset_ax.set_xticklabels(["0", "π"], fontsize=6)
-
-    # also plot the threshold estimates as points
+    inset_ax.set_ylim(0, np.max(thresholds) * 1.3 if ymax_inset is None else ymax_inset)
     
 
-    #inset_ax.scatter(center_of_bins, thresholds, c=center_of_bins, cmap=cmap, norm=norm, s=10, edgecolor='k', linewidth=0.5)
 
     if figpath:
-        plt.savefig(figpath / f"{participant}_psychometric_function.png", dpi=300)
         plt.savefig(figpath / f"{participant}_psychometric_function.svg")
     plt.close()
 
@@ -180,7 +177,7 @@ if __name__ == "__main__":
     # empty dataframe to store threshold estimates
     threshold_estimates = pd.DataFrame(columns=["participant", "center", "sin_phase", "cos_phase", "threshold", "zscored_threshold"])
     
-
+    results_all = {}
     for participant, values in tqdm(data.items(), desc="Fitting psychometric functions"):
         
         print(f"Processing participant {participant}...")
@@ -210,7 +207,7 @@ if __name__ == "__main__":
                 np.ones(len(PA_hit), dtype=int),
                 np.zeros(len(PA_miss), dtype=int)
         ])
-        
+
         intensities = np.concatenate([intensity_hit, intensity_miss])
 
 
@@ -239,6 +236,15 @@ if __name__ == "__main__":
             else:
                 center_of_bins.append(c)
 
+            # only taking 30 trials randomly so all refits have same number of trials
+            #if len(tmp_hit_or_miss) > MIN_TRIALS_PER_BIN:
+            #    selected_indices = np.random.choice(len(tmp_hit_or_miss), size=MIN_TRIALS_PER_BIN, replace=False)
+            #    tmp_int = tmp_int[selected_indices]
+            #    tmp_hit_or_miss = tmp_hit_or_miss[selected_indices]
+
+
+
+
             # All parameters except the threshold were then fixed and used as priors for fitting the psychometric function iteratively to an angle-specific subset of trials (gray functions).
             tmp_result = ps.psignifit(
                 format_data_for_psignifit(tmp_int, tmp_hit_or_miss),
@@ -251,8 +257,7 @@ if __name__ == "__main__":
                 debug=True,
                 **psignifit_kwargs
             )
-            #if i == 0:
-            #    plot_priors(tmp_result, figpath / f"{participant}_priors_phase_{c:.2f}.png")
+
 
             refitted_results.append(tmp_result)
 
@@ -266,20 +271,42 @@ if __name__ == "__main__":
             "sin_phase": np.sin(center_of_bins),
             "cos_phase": np.cos(center_of_bins),
             "threshold": thresholds_refitted,
-            "zscored_threshold": zscored_thresholds
+            "zscored_threshold": zscored_thresholds,
         })
+
+        # add a line for the full data fit threshold as well
+        full_data_row = pd.DataFrame({
+            "participant": participant,
+            "center": "full_data_fit",
+            "sin_phase": np.nan,
+            "cos_phase": np.nan,
+            "threshold": result_all_data.parameter_estimate['threshold'],
+            "zscored_threshold": np.nan
+        }, index=[0])
 
 
         threshold_estimates = pd.concat([
             threshold_estimates if not threshold_estimates.empty else None, 
-            new_data
+            new_data,
+            full_data_row
             ], ignore_index=True)
         
-        plot_subject_level(refitted_results, result_all_data, center_of_bins, participant, figpath_participant)
+        results_all[participant] = {"refitted_results": refitted_results, "full_data_result": result_all_data, "center_of_bins": center_of_bins}
+
+        
 
     # Save threshold estimates to CSV
     threshold_estimates.to_csv(figpath / "threshold_estimates.csv", index=False)
+    
+    # PARTICPANT-LEVEL PLOTS
+    # max threshold across all participants for setting y limit in polar plot in participant-level plots
+    max_threshold = threshold_estimates["threshold"].max()
 
+    for participant, results in results_all.items():
+        plot_subject_level(results["refitted_results"], results["full_data_result"], results["center_of_bins"], participant, figpath_participant, ymax_inset=max_threshold+0.1)
+
+    # remove the full data fit rows for the LMEM analysis
+    threshold_estimates = threshold_estimates[threshold_estimates["center"] != "full_data_fit"]
     LMEM_analysis(
         LMEM=LMEM,
         data = threshold_estimates,
@@ -287,5 +314,5 @@ if __name__ == "__main__":
         n_null=N_NULL_LMEM,
         figpath=figpath / "h2_LMEM_phase_modulates_sensitivity.svg",
         txtpath=figpath / "h2_LMEM_results.txt",
-        n_jobs=-1
+        n_jobs=4
     )
