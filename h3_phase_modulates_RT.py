@@ -20,31 +20,14 @@ from utils import binned_stats
 N_NULL_LMEM = 10_000
 OUTLIER_THRESHOLD = 3
 SIMPLE_MODEL = True
-RT_COL = "log_rt" # could also be "rt"
+RT_COL = "log_rt"
 
-# Suppress warnings from statsmodels
-SUPPRESS_WARNINGS = True
-
-if SUPPRESS_WARNINGS:
-    import warnings
-    from statsmodels.tools.sm_exceptions import ConvergenceWarning
-    warnings.filterwarnings("ignore", category=ConvergenceWarning, module="statsmodels")
 
 
 
 def LMEM(data):
-    # model specification in R would be
-    # log_rt ~ sin_phase + cos_phase + (sin_phase + cos_phase + intensity | participant)
-
-    model = smf.mixedlm(
-        f"{RT_COL} ~ sin_phase + cos_phase",  # Fixed effects
-        data=data,
-        groups=data["participant"],  # Random effects
-        re_formula="~ sin_phase + cos_phase + intensity"  # Controlling for intensity by including it as random slope
-    )
-    
     # SIMPLE IF IT DOES NOT CONVERGE
-    # log_rt ~ sin_phase + cos_phase + (intensity | participant)
+    # log_rt ~ sin_phase + cos_phase + (1 + intensity | participant)
     if SIMPLE_MODEL:
         model = smf.mixedlm(
             f"{RT_COL} ~ sin_phase + cos_phase",  # Fixed effects
@@ -52,11 +35,21 @@ def LMEM(data):
             groups=data["participant"],  # Random effects
             re_formula="~intensity"  # Controlling for intensity by including it as random slope
         )
+    else:
+        # model specification in R would be
+        # log_rt ~ sin_phase + cos_phase + (1 + sin_phase + cos_phase + intensity | participant)
+
+        model = smf.mixedlm(
+            f"{RT_COL} ~ sin_phase + cos_phase",  # Fixed effects
+            data=data,
+            groups=data["participant"],  # Random effects
+            re_formula="~ sin_phase + cos_phase + intensity"  # Controlling for intensity by including it as random slopes
+        )
 
     return model.fit()
 
 
-def plot_subject_RT_by_phase(data, figpath, filter_outliers=True, num_bins=40, stat="mean"):
+def plot_subject_RT_by_phase(data, figpath, filter_outliers=True, num_bins=20, stat="mean"):
     """
     Plot response time by phase for each subject in a polar plot.
 
@@ -80,18 +73,21 @@ def plot_subject_RT_by_phase(data, figpath, filter_outliers=True, num_bins=40, s
     None
         Saves the figure to the specified path.
     """
-    n_rows = 3
-    n_cols = len(data) // n_rows + (len(data) % n_rows > 0)
+    #n_rows = 3
+    #n_cols = len(data) // n_rows + (len(data) % n_rows > 0)
 
-    figsize = (n_cols * 4, n_rows * 4)
+    #figsize = (n_cols * 4, n_rows * 4)
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize, subplot_kw={"projection": "polar"}, sharex=True, sharey=False)
+    fig, ax = plt.subplots(1, 1, figsize=(6, 6), subplot_kw={"projection": "polar"})
 
-    for i, (subj_id, dat) in enumerate(data.items()):
+    colours = plt.get_cmap('tab20', len(data))
+    colours = [colours(i) for i in range(len(data))]
+
+    for (subj_id, dat), colour in zip(data.items(), colours):
 
         #preproc = dat["preproc"]
-        circ = dat["circ"]
-        rt = dat["rt"] 
+        circ = dat["circ"]["target"]
+        rt = np.array(circ.metadata["rt"]) 
 
         # find the indices where rt is not none
         rt_indices = np.where(~np.isnan(rt))[0]
@@ -115,11 +111,27 @@ def plot_subject_RT_by_phase(data, figpath, filter_outliers=True, num_bins=40, s
         bin_centers, avg_response_times, std_response_times = binned_stats(targets_with_responses, rt, n_bins=num_bins, stat=stat)
 
         circ_for_plot = Circular(bin_centers)
-        plot = CircPlot(circ_for_plot, group_by_labels=False, ax=axes[i], title=subj_id)
-        plot.add_connected_points(y=avg_response_times, color='forestgreen', alpha=0.5, marker ='o')
-        plot.add_hline(y=np.nanmean(avg_response_times), color='gray', linestyle='--', label=f'{stat.capitalize()} RT')
-        axes[i].set_ylim(0.4, np.nanmax(avg_response_times) + 0.1 * np.nanmax(avg_response_times))
+        plot = CircPlot(circ_for_plot, group_by_labels=False, ax=ax)
+        plot.add_connected_points(y=avg_response_times, color=colour, alpha=0.4, marker ='.', linewidth=2)
+        #plot.add_hline(y=np.nanmean(avg_response_times), color='gray', linestyle='--', label=f'{stat.capitalize()} RT')
+        #axes[i].set_ylim(0.4, np.nanmax(avg_response_times) + 0.1 * np.nanmax(avg_response_times))
 
+
+    # add ticks and labels
+    #ax.set_xticks(np.linspace(0, 2 * np.pi, 8, endpoint=False))
+    #ax.set_xticklabels(['0', 'π/4', 'π/2', '3π/4', 'π', '5π/4', '3π/2', '7π/4'])
+    ax.set_ylabel("Response Time (s)")
+    
+    # add y ticks
+    # y lim 
+    ylim = ax.get_ylim()
+    ax.set_ylim(0, ylim[1])
+    ax.set_yticks(np.linspace(ylim[0], ylim[1], 3))
+    ax.set_yticklabels([np.round(tick, 2) for tick in np.linspace(ylim[0], ylim[1], 3)])
+    ax.set_rlabel_position(30)  # Move radial labels away from plotted line
+
+    # add grid  
+    ax.grid(True)
 
 
     plt.tight_layout()
@@ -128,46 +140,42 @@ def plot_subject_RT_by_phase(data, figpath, filter_outliers=True, num_bins=40, s
         plt.savefig(figpath, dpi=300)
 
 
-
-
-
-
 if __name__ == "__main__":
 
-    dataset = "pilots"
-    variables = ["rt", "circ", "intensity"]
+    dataset = "raw"
+    variables = ["circ"]
     data = load_data(variables, dataset)
 
     figpath = Path(__file__).parent / "results" / "h3"
     figpath.mkdir(exist_ok=True, parents=True)
 
 
-    LMEM_data = pd.DataFrame(columns=["participant", "rt", "cos_phase", "sin_phase", "intensity"])
+    LMEM_data = pd.DataFrame(columns=["participant", "rt", "log_rt", "cos_phase", "sin_phase", "intensity"])
 
 
+    
     plot_subject_RT_by_phase(
         data=data,
-        figpath=figpath / "h3_RT_by_phase_polar.png",
+        figpath=figpath / "h3_RT_by_phase_polar.svg",
         filter_outliers=True,
-        num_bins=20,
+        num_bins=15,
         stat="mean"
     )
 
     #plot_grand_average_modulation()
         
     for participant, values in data.items():
-        # remove nans from rt
-        rt = np.array(values["rt"])
-        # find the indices where rt is not none
-        rt_indices = np.where(~np.isnan(rt))[0]
-        rt = rt[rt_indices]
+        circ = values["circ"]["target"]
 
-        circ = values["circ"]
-        targets_with_responses = circ.data[rt_indices-1] # get the phase angle at the target stimuli
-        intensity = values["intensity"][rt_indices-1] # get the intensity of the target stimuli
+        # with responses
+        circ_correct, circ_incorrect = circ["/correct"], circ["/incorrect"]
+        circ_with_responses = circ_correct + circ_incorrect
 
-        # check that target is in label
-        assert ["target" in label for label in circ.labels[rt_indices-1]], "something went wrong"
+        # extract relevant data for the LMEM
+        intensity = circ_with_responses.metadata["intensity"]
+        rt = circ_with_responses.metadata["rt"]
+        targets_with_responses = circ_with_responses.data
+
 
         # detect outliers
         z_scores = np.abs(stats.zscore(rt))
@@ -195,20 +203,12 @@ if __name__ == "__main__":
             new_data
         ], ignore_index=True)
 
-    print(LMEM_data.head())
-    print(f"\nNumber of NaNs in LMEM_data:\n {LMEM_data.isnull().sum()}\n")
-
-    # drop rows with nans
-    LMEM_data = LMEM_data.dropna()
-
-    print(LMEM_data.head())
-
     LMEM_analysis(
         LMEM=LMEM, 
         data=LMEM_data,
         dependent_variable=RT_COL,
         n_null=N_NULL_LMEM, 
-        figpath=figpath / "h3_LMEM_phase_modulates_RT.png", 
+        figpath=figpath / "h3_LMEM_phase_modulates_RT.svg", 
         txtpath=figpath / "h3_LMEM_phase_modulates_RT.txt",
         n_jobs=-1
     )
